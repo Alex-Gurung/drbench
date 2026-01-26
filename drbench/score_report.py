@@ -4,12 +4,6 @@ import logging
 import os
 import re
 import time
-import dotenv
-
-# Load environment variables
-dotenv.load_dotenv()
-
-# Suppress specific LiteLLM warning
 logging.getLogger("LiteLLM").setLevel(logging.ERROR)
 
 from typing import Any, Dict, List, Optional
@@ -24,6 +18,10 @@ from drbench.metrics import get_metric
 
 # Truncate report text to 60000 characters if necessary
 MAX_REPORT_LENGTH = 60000
+
+
+def _normalize_text(text: str) -> str:
+    return " ".join(str(text).split()).strip().lower()
 
 
 def score_report(
@@ -144,7 +142,7 @@ def score_report(
         if verbose:
             print(f"Computing {metric_name}...")
 
-        metric = get_metric(metric_name)
+        metric = get_metric(metric_name, model=model)
         metric_result = metric.compute(
             report_dict=predicted_report_dict,
             task_data=task_config,
@@ -186,8 +184,11 @@ def score_report(
             factuality_details_map = {}
             if "detailed_factuality" in factuality_results:
                 for detail in factuality_results["detailed_factuality"]:
-                    insight_text = detail.get("answer", "")
-                    factuality_details_map[insight_text] = {
+                    insight_text = detail.get("insight") or detail.get("answer") or detail.get("claim") or ""
+                    normalized = _normalize_text(insight_text)
+                    if not normalized:
+                        continue
+                    factuality_details_map[normalized] = {
                         "is_factual": detail.get("is_factual", False),
                         "explanation": detail.get("explanation", "No explanation available"),
                         "citations": detail.get("citations", []),
@@ -196,21 +197,24 @@ def score_report(
             # Fallback to basic factual/unfactual lists if detailed_factuality not available
             factual_claims = set(factuality_results.get("factual_claims", []))
             unfactual_claims = set(factuality_results.get("unfactual_claims", []))
+            factual_claims_norm = {_normalize_text(claim) for claim in factual_claims}
+            unfactual_claims_norm = {_normalize_text(claim) for claim in unfactual_claims}
 
             for insight_data in selected_insights:
                 insight_text = insight_data.get("claim", "")
                 citations = insight_data.get("citations", [])
+                normalized = _normalize_text(insight_text)
 
                 # Try to get detailed factuality information first
-                if insight_text in factuality_details_map:
-                    factuality_detail = factuality_details_map[insight_text]
+                if normalized in factuality_details_map:
+                    factuality_detail = factuality_details_map[normalized]
                     is_factual = factuality_detail["is_factual"]
                     justification = factuality_detail["explanation"]
                 # Fallback to basic factual/unfactual classification
-                elif insight_text in factual_claims:
+                elif normalized in factual_claims_norm:
                     is_factual = True
                     justification = "Verified as factual by the factuality metric"
-                elif insight_text in unfactual_claims:
+                elif normalized in unfactual_claims_norm:
                     is_factual = False
                     justification = "Identified as unfactual by the factuality metric"
                 else:
@@ -220,7 +224,7 @@ def score_report(
                         insight_text,
                         citations,
                         file_list=env_files,
-                        model="gpt-4o-mini",
+                        model=model,
                     )
                     is_factual = factuality_result["is_factual"]
                     justification = factuality_result["explanation"]
@@ -252,7 +256,7 @@ def score_report(
 
                 # Get factuality verdict
                 factuality_result = get_factuality_verdict_multi(
-                    insight_text, citations, file_list=env_files, model="gpt-4o-mini"
+                    insight_text, citations, file_list=env_files, model=model
                 )
 
                 per_insight_scores.append(
@@ -306,7 +310,7 @@ def score_report(
                     if verbose and attempt > 0:
                         print(f"Retrying recall matching (attempt {attempt + 1}/{max_retries})...")
 
-                    recall_response = prompt_llm(recall_matching_prompt, "gpt-4o-mini", temperature=0)
+                    recall_response = prompt_llm(recall_matching_prompt, model, temperature=0)
 
                     # Extract JSON from response using regex to handle various formats
                     response_text = recall_response.strip()

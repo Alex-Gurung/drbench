@@ -1,44 +1,45 @@
-import json, os
+import json
+import os
 import pandas as pd
 import glob
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-
 import warnings
+
+from drbench.config import get_data_dir
 
 # Base package directory
 ROOT_DIR = Path(__file__).parent.parent
 
 
-def get_all_subset_files_in_dir(dir_path: str):
-    # Check for custom data directory
-    custom_data_dir = os.environ.get('DRBENCH_DATA_DIR')
-    if custom_data_dir:
-        path = os.path.join(custom_data_dir, "data", "subsets")
-    else:
-        path = os.path.join(ROOT_DIR, "drbench", "data", "subsets")
-    return glob.glob(os.path.join(path, "*.jsonl"))
+def get_all_subset_files_in_dir(dir_path: Optional[str] = None):
+    """Return all subset files in a directory (supports custom data dir)."""
+    if dir_path is None:
+        dir_path = "drbench/data/subsets"
+    path = Path(get_data_path(dir_path))
+    return glob.glob(str(path / "*.jsonl"))
 
 
 # Convenience accessors
 def get_data_path(data_name) -> str:
-    """Get path to a data resource
+    """Get path to a data resource.
 
-    Checks for DRBENCH_DATA_DIR environment variable to allow
-    loading data from a custom location. If not set, uses the
-    default package installation directory.
+    - Supports absolute paths directly.
+    - Uses DRBENCH_DATA_DIR if set (via env or CLI).
+    - Falls back to repo-local data directory.
     """
-    # make it path
     if isinstance(data_name, str):
         data_name = Path(data_name)
 
-    # Check for custom data directory
-    custom_data_dir = os.environ.get('DRBENCH_DATA_DIR')
-    if custom_data_dir:
-        path = Path(custom_data_dir) / data_name
+    if data_name.is_absolute():
+        path = data_name
     else:
-        path = Path(ROOT_DIR) / data_name
+        data_root = get_data_dir()
+        # If the caller passed "drbench/data/...", strip the leading "drbench"
+        if data_name.parts[:2] == ("drbench", "data"):
+            data_name = Path(*data_name.parts[1:])
+        path = data_root / data_name
 
     if not path.exists():
         warnings.warn(f"Data directory not found at {path}")
@@ -395,7 +396,7 @@ class TaskLoader:
 
 
 def get_task_from_id(task_id: str) -> Task:
-    path = Path(__file__).parent / "data" / "tasks" / task_id / "config"
+    path = get_data_path(f"drbench/data/tasks/{task_id}/config")
     task = Task(path)
     return task
 
@@ -411,7 +412,7 @@ def get_task_from_id(task_id: str) -> Task:
 
 
 def save_all_subset_to_csv() -> List[str]:
-    files = get_all_subset_files_in_dir("validation")
+    files = get_all_subset_files_in_dir()
     # save each file to a csv for easy viewing
     # os.makedirs("drbench/data/subset", exist_ok=True)
 
@@ -451,7 +452,7 @@ def save_all_subset_to_csv() -> List[str]:
 
 
 def get_all_subset_files() -> List[str]:
-    return get_all_subset_files_in_dir("validation")
+    return get_all_subset_files_in_dir()
 
 
 def get_tasks_from_subset_file(file_path: str) -> List[Task]:
@@ -538,14 +539,14 @@ def get_tasks_df(subset: str = None, saveto=None):
 
     else:
         # Load all tasks from the tasks directory
-        tasks_dir = ROOT_DIR / Path("drbench/data/tasks")
+        tasks_dir = Path(get_data_path("drbench/data/tasks"))
         task_ids_to_process = [
             task_dir.name for task_dir in tasks_dir.iterdir() if task_dir.is_dir()
         ]
 
     # Process each task
     for task_id in task_ids_to_process:
-        task_dir = ROOT_DIR / Path("drbench/data/tasks") / task_id
+        task_dir = Path(get_data_path("drbench/data/tasks")) / task_id
         dr_question_file = task_dir / "dr_question.json"
         info_file = task_dir / "info.json"
         context_file = task_dir / "context.json"
@@ -629,7 +630,7 @@ def get_facts_df(task_id, saveto=None):
     Returns:
         pd.DataFrame: DataFrame with fact information from qa_dict.json files
     """
-    task_dir = ROOT_DIR / Path(f"drbench/data/tasks/{task_id}")
+    task_dir = Path(get_data_path(f"drbench/data/tasks/{task_id}"))
     files_dir = task_dir / "files"
 
     if not files_dir.exists():

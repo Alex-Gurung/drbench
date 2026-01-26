@@ -1,0 +1,75 @@
+Generate specific executable actions for this research investigation area with SOURCE PRIORITIZATION:
+
+Research Focus: {research_question}
+Information Needs: [Find external validation, industry benchmarks, best practices, or regulatory information]
+Knowledge Sources: [both]
+Research Approach: strategic_assessment
+Key Concepts: []
+Available Tools: ['LocalFileSearchTool', 'InternetSearchTool']
+
+Tool Selection Guidelines:
+    - Use "LocalFileSearchTool" for Searching and retrieving information from local document collections
+    - Use "InternetSearchTool" for Searching the web for current information and external sources
+
+SOURCE PRIORITIZATION STRATEGY (CRITICAL):
+    1. **FIRST PRIORITY**: Internal/Enterprise Sources
+       - Use LOCAL_DOCUMENT_SEARCH actions to search provided local documents
+       - Look for relevant information in uploaded files and documents
+       - Priority should be 0.8-1.0 for these actions
+
+    2. **SECOND PRIORITY**: External Validation
+       - Use WEB_SEARCH actions to find public information that supports/validates internal findings
+       - Search for industry trends, best practices, external validation
+       - Priority should be 0.5-0.7 for these actions
+
+    3. **COMPLEMENT STRATEGY**:
+       - Internal sources provide proprietary insights and current state
+       - External sources provide industry context and validation
+       - Both are needed for comprehensive analysis
+
+    For each action, specify:
+    1. Action type (local_document_search, local_file_analysis, web_search, url_fetch, enterprise_api, mcp_query, synthesis)
+    2. Specific parameters needed
+    3. Priority (0.0 to 1.0) - HIGHER for internal/enterprise sources
+    4. Expected output description
+    5. Preferred tool (choose from available tools above)
+
+    Requirements:
+    - START with local document actions (LOCAL_DOCUMENT_SEARCH, LOCAL_FILE_ANALYSIS)
+    - FOLLOW with external validation actions (WEB_SEARCH, URL_FETCH)
+    - Actions should be executable by the agent
+    - Action types should be one of: local_document_search, local_file_analysis, web_search, url_fetch, enterprise_api, mcp_query, synthesis
+    - Actions should be independent and executable in parallel when possible
+    - Don't make up websites or urls
+    - If you need to search use web_search
+    - If you need to learn about available APIs use enterprise_api, mcp_query, or search for information on the internet
+    - Make sure that each action has a CLEAR, DESCRIPTIVE description and expected output
+    - Descriptions should be specific (e.g., "Search internal Mattermost for customer feedback on X feature" not "Search internal systems")
+    - ALWAYS prioritize enterprise tools for internal data and use internet tools as supporting context
+
+    Return a JSON array of actions (NO dependencies field needed):
+    [
+    {{
+        "type": "local_document_search",
+        "description": "Search local documents for relevant information",
+        "parameters": {{"query": "specific search terms for local docs", "top_k": 10}},
+        "priority": 0.9,
+        "expected_output": "Relevant information from local document collection",
+        "preferred_tool": "LocalFileSearchTool"
+    }},{{
+        "type": "web_search",
+        "description": "Search external sources for industry context and validation",
+        "parameters": {{"query": "industry trends validation terms", "num_results": 10}},
+        "priority": 0.6,
+        "expected_output": "External articles and industry data for context",
+        "preferred_tool": "InternetSearchTool"
+    }}
+    ]
+
+    Just return valid JSON, no other text.
+
+Local Findings from Internal Documents (already retrieved):
+{local_findings}
+
+Based on the local findings above, generate WEB_SEARCH actions only (local documents have already been searched).
+Generate actions to find external validation, industry benchmarks, best practices, and regulatory information.

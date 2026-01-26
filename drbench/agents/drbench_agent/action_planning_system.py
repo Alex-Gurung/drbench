@@ -4,12 +4,14 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from drbench.agents.drbench_agent.agent_tools.base import ResearchContext
 from drbench.agents.utils import prompt_llm
+from drbench.config import get_run_config
 
 logger = logging.getLogger(__name__)
 
@@ -513,6 +515,17 @@ class ActionPlanner:
 
         return "\n".join(guidelines) if guidelines else "    - Use appropriate tools based on task requirements"
 
+    def _log_prompt(self, prompt: str, filename: str) -> None:
+        """Log prompts to run_dir/prompts when enabled."""
+        cfg = get_run_config()
+        if not cfg.log_prompts:
+            return
+        if not cfg.run_dir:
+            raise ValueError("--run-dir is required for prompt logging.")
+        prompt_dir = Path(cfg.run_dir) / "prompts"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        (prompt_dir / filename).write_text(prompt, encoding="utf-8")
+
     def _extract_task_id(self, task: Dict[str, Any]) -> str:
         """Extract task identifier from research investigation area"""
         # Current research plan format uses area_id
@@ -563,6 +576,8 @@ class ActionPlanner:
 {_get_action_plan_guidelines(available_tool_names)}
     """
 
+        self._log_prompt(prompt, f"action_prompt_iter{getattr(context, 'iteration', 0)}.txt")
+
         try:
             action_configs = prompt_llm_and_parse_json(self.model, prompt)
 
@@ -599,7 +614,7 @@ class ActionPlanner:
 
         except Exception as e:
             logger.error(f"Error generating actions for task: {e}")
-            return []
+            raise
 
     def _fallback_task_actions(self, task: Dict[str, Any], tool_registry) -> List[Action]:
         """Fallback action generation when LLM fails"""
@@ -676,6 +691,8 @@ class ActionPlanner:
 
     {_get_action_plan_guidelines(available_tool_names)}
     """
+
+        self._log_prompt(prompt, f"fallback_prompt_iter{getattr(context, 'iteration', 0)}.txt")
 
         try:
             action_configs = prompt_llm_and_parse_json(self.model, prompt)
@@ -859,6 +876,8 @@ Return a JSON array of new actions:
 Create valid JSON only, no other text.
 """
 
+        self._log_prompt(prompt, f"adaptive_prompt_iter{action_plan.current_iteration}.txt")
+
         try:
             action_configs = prompt_llm_and_parse_json(self.model, prompt)
 
@@ -892,7 +911,7 @@ Create valid JSON only, no other text.
 
         except Exception as e:
             logger.error(f"Error generating adaptive actions: {e}")
-            return []
+            raise
 
     def _deduplicate_actions(self, new_actions: List[Action], existing_actions: List[Action]) -> List[Action]:
         """Remove duplicate or highly similar actions"""

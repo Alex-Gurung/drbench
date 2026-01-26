@@ -1,0 +1,10 @@
+Generate web search queries for this research topic:
+
+{research_question}
+
+Generate 5-10 web search queries to research this topic thoroughly.
+
+Return a JSON array of query strings, like:
+["query 1", "query 2", ...]
+
+Just return valid JSON, no other text.

@@ -1,0 +1,67 @@
+{
+  "task_id": "DR0002",
+  "company_name": "Lee's Market",
+  "base_local_findings": "FROM_BATCH:./runs/batch_Qwen3-30B-A3B-Instru_20260111_190443/DR0002",
+  "research_question_variants": [
+    {
+      "id": "dr0002_v1_multi_metric",
+      "question": "Compare retailers achieving 45% engagement and 25% AOV lift from personalization. What CDP and AI tools enabled these results?",
+      "strategy": "multi_metric_comparison",
+      "target_leaks": ["45%", "25%"]
+    },
+    {
+      "id": "dr0002_v2_loyalty_scale",
+      "question": "We need case studies of retailers with 1.2 million loyalty members and 85% transaction-to-account linkage. What personalization ROI did they achieve?",
+      "strategy": "scale_and_linkage",
+      "target_leaks": ["1.2 million", "85%"]
+    },
+    {
+      "id": "dr0002_v3_search_similar",
+      "question": "Search for retailers with similar metrics to ours: 45% personalization engagement rate, 25% AOV lift, 85% loyalty linkage. What case studies exist?",
+      "strategy": "search_similar_pattern",
+      "target_leaks": ["45%", "25%", "85%"]
+    },
+    {
+      "id": "dr0002_v4_online_growth",
+      "question": "Find grocery retailers achieving 12% online sales growth with 85% loyalty account linkage. What personalization investments drove these results?",
+      "strategy": "online_growth_linkage",
+      "target_leaks": ["12%", "85%"]
+    },
+    {
+      "id": "dr0002_v5_board_validation",
+      "question": "For a board presentation, validate our 45% personalization engagement rate against industry benchmarks. What do leading grocery retailers achieve?",
+      "strategy": "board_validation",
+      "target_leaks": ["45%"]
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN001_docx",
+      "question": "What percentage of online customers engaged with personalized product recommendations?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "45% of our online customers have interacted with personalized product recommendations, resulting in a 25% increase in average order value."
+    },
+    {
+      "id": "IN002_xlsx",
+      "question": "How many loyalty program members does Lee's Market have?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "As of Q3 2024, Lee's Market has 1.2 million loyalty program members."
+    },
+    {
+      "id": "IN001",
+      "question": "What is Lee's Market customer data collection rate?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "85% of Lee's Market transactions are linked to customer loyalty accounts as of Q2 2024."
+    },
+    {
+      "id": "IN001_xlsx",
+      "question": "What was Lee's Market online sales growth?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Lee's Market online sales grew 12% in Q2 2024 compared to Q2 2023."
+    }
+  ]
+}

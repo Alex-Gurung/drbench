@@ -5,8 +5,11 @@ warnings.filterwarnings("ignore")
 
 # import libraries
 import argparse
+import logging
 import os
 import textwrap
+import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -14,97 +17,139 @@ from together import Together
 
 # Import centralized configuration
 from drbench import config
+from drbench.config import RunConfig, get_run_config, set_run_config
+from drbench.openrouter_logging import log_openrouter_generation
 
-# Available AI Models Configuration
-AVAILABLE_SERVICES = ["vllm", "together", "openai"]
-AVAILABLE_MODELS = [
-    "meta-llama/Meta-Llama-3-8B-Instruct-Lite",
-    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "meta-llama/Meta-Llama-3-70B-Instruct-Lite",
-    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-    "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-    "neuralmagic/Meta-Llama-3.1-405B-Instruct-FP8",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
-    "mistralai/Mistral-7B-Instruct-v0.1",
-    "gpt-4o-mini",
-    "gpt-4o",
-]
+logger = logging.getLogger(__name__)
 
-SERVICE_TO_MODELS = {
-    "vllm": ["neuralmagic/Meta-Llama-3.1-405B-Instruct-FP8"],
-    "together": [
-        "meta-llama/Meta-Llama-3-8B-Instruct-Lite",
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    ],
+# Available providers and example models
+AVAILABLE_PROVIDERS = ["openai", "openrouter", "vllm", "together", "azure"]
+EXAMPLE_MODELS = {
     "openai": ["gpt-4o-mini", "gpt-4o"],
+    "openrouter": ["anthropic/claude-3.5-sonnet", "openai/gpt-4o"],
+    "vllm": ["Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"],
+    "together": ["meta-llama/Llama-3.3-70B-Instruct-Turbo"],
+    "azure": ["gpt-4o"],
 }
 
 
 class AIAgentManager:
-    """Manager class for AI agent operations"""
+    """Manager class for AI agent operations.
+
+    Uses explicit provider routing via DRBENCH_LLM_PROVIDER environment variable.
+    No URL sniffing or model-based guessing.
+
+    Args:
+        model: Model name to use
+        provider: LLM provider override (defaults to DRBENCH_LLM_PROVIDER env var)
+        api_key: API key override (defaults to provider-specific env var)
+        api_url: API URL override for vllm/openrouter (defaults to env var)
+        max_tokens: Maximum tokens for generation
+        temperature: Temperature for generation
+        with_linebreak: Whether to wrap output with linebreaks
+    """
 
     def __init__(
         self,
+        model: str,
+        provider: Optional[str] = None,
         api_key: Optional[str] = None,
         api_url: Optional[str] = None,
-        model: str = "meta-llama/Meta-Llama-3-8B-Instruct-Lite",
         max_tokens: int = 1000,
         temperature: float = 0.7,
         with_linebreak: bool = False,
     ):
-        if model in SERVICE_TO_MODELS["vllm"]:
-            self.service = "vllm"
-        elif model in SERVICE_TO_MODELS["together"]:
-            self.service = "together"
-        elif model in SERVICE_TO_MODELS["openai"]:
-            self.service = "openai"
-        else:
-            raise ValueError(f"Invalid model: {model}")
+        # Determine provider explicitly - NO URL sniffing
+        cfg = get_run_config()
+        self.provider = provider or cfg.get_llm_provider()
+
+        if self.provider not in AVAILABLE_PROVIDERS:
+            raise ValueError(
+                f"Unknown provider: '{self.provider}'. "
+                f"Set DRBENCH_LLM_PROVIDER to one of: {', '.join(AVAILABLE_PROVIDERS)}"
+            )
 
         self.client = None
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.with_linebreak = with_linebreak
-        self.get_api_key_from_env(api_key, api_url)
-        self.initialize_client()
 
-    def get_api_key_from_env(self, api_key, api_url):
-        """Get the API key from the environment"""
-        if self.service == "vllm":
-            self.api_url = api_url or config.VLLM_API_URL
-            self.api_key = api_key or config.VLLM_API_KEY
-        elif self.service == "together":
-            self.api_key = api_key or config.TOGETHER_API_KEY
-        elif self.service == "openai":
+        # Set up credentials based on explicit provider
+        self._setup_credentials(api_key, api_url)
+        self._initialize_client()
+
+    def _setup_credentials(self, api_key: Optional[str], api_url: Optional[str]):
+        """Set up API credentials based on provider."""
+        if self.provider == "openai":
             self.api_key = api_key or config.OPENAI_API_KEY
+            self.api_url = None
+            if not self.api_key:
+                raise ValueError(
+                    "DRBENCH_LLM_PROVIDER=openai requires OPENAI_API_KEY to be set"
+                )
 
-    def initialize_client(self):
-        if not self.api_key:
-            raise ValueError("No API key provided. Please provide a valid API key.")
+        elif self.provider == "openrouter":
+            self.api_key = api_key or config.OPENROUTER_API_KEY
+            self.api_url = api_url or config.OPENROUTER_API_URL
+            if not self.api_key:
+                raise ValueError(
+                    "DRBENCH_LLM_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set"
+                )
 
-        if self.service == "vllm":
+        elif self.provider == "vllm":
+            self.api_key = api_key or config.VLLM_API_KEY or "not-needed"
+            self.api_url = api_url or config.VLLM_API_URL
             if not self.api_url:
-                raise ValueError("No API URL provided. Please provide a valid API URL.")
-            self.client = OpenAI(base_url=f"{self.api_url}/v1", api_key=self.api_key)
-        elif self.service == "together":
-            self.client = Together(api_key=self.api_key)
-        elif self.service == "openai":
+                raise ValueError(
+                    "DRBENCH_LLM_PROVIDER=vllm requires VLLM_API_URL to be set"
+                )
+
+        elif self.provider == "together":
+            self.api_key = api_key or config.TOGETHER_API_KEY
+            self.api_url = None
+            if not self.api_key:
+                raise ValueError(
+                    "DRBENCH_LLM_PROVIDER=together requires TOGETHER_API_KEY to be set"
+                )
+
+        elif self.provider == "azure":
+            self.api_key = api_key or config.AZURE_API_KEY
+            self.api_url = api_url or config.AZURE_ENDPOINT
+            if not self.api_key or not self.api_url:
+                raise ValueError(
+                    "DRBENCH_LLM_PROVIDER=azure requires AZURE_API_KEY and AZURE_ENDPOINT"
+                )
+
+    def _initialize_client(self):
+        """Initialize the appropriate client for the provider."""
+        if self.provider == "openai":
             self.client = OpenAI(api_key=self.api_key)
-        else:
-            raise ValueError(f"Invalid service: {self.service}")
 
-    def get_available_models(self) -> List[str]:
-        """Get list of available AI models"""
-        return AVAILABLE_MODELS
+        elif self.provider == "openrouter":
+            self.client = OpenAI(base_url=self.api_url, api_key=self.api_key)
 
-    def get_available_services(self) -> List[str]:
-        """Get list of available services"""
-        return AVAILABLE_SERVICES
+        elif self.provider == "vllm":
+            self.client = OpenAI(base_url=f"{self.api_url}/v1", api_key=self.api_key)
+
+        elif self.provider == "together":
+            self.client = Together(api_key=self.api_key)
+
+        elif self.provider == "azure":
+            from openai import AzureOpenAI
+            self.client = AzureOpenAI(
+                api_key=self.api_key,
+                azure_endpoint=self.api_url,
+                api_version=config.AZURE_API_VERSION or "2024-02-15-preview",
+            )
+
+    def get_available_providers(self) -> List[str]:
+        """Get list of available providers"""
+        return AVAILABLE_PROVIDERS
 
     def get_structured_response_function(self) -> Any:
         """Get the structured response function"""
-        if self.service == "together":
+        if self.provider == "together":
             return self.client.chat.completions.create
         return self.client.beta.chat.completions.parse
 
@@ -115,32 +160,27 @@ class AIAgentManager:
         return_json: bool = False,
     ) -> str | Any:
         """
-        Main function to prompt an LLM via the Together API
+        Prompt the LLM and get a response.
 
         Args:
             prompt: The text prompt to send to the model
-            response_format: The response format to use
+            response_format: Optional Pydantic model for structured output
+            return_json: If True, extract JSON from response
 
         Returns:
             Generated text response or parsed response if response_format is provided
         """
-        print(f"\nPrompting\n\nModel: {self.model}\n\nService: {self.service}\n\n")
-        if not self.client:
-            raise ValueError("Client not initialized. Please provide a valid API key.")
+        # Use logging, not print
+        logger.debug(f"Prompting {self.model} via {self.provider}")
 
-        if self.model not in AVAILABLE_MODELS:
-            print(
-                f"Warning: Model {self.model} not in available models list. Using default."
-            )
-            model = "meta-llama/Meta-Llama-3-8B-Instruct-Lite"
-        else:
-            model = self.model
+        if not self.client:
+            raise ValueError("Client not initialized")
 
         try:
             if response_format:
                 structured_response_function = self.get_structured_response_function()
                 response = structured_response_function(
-                    model=model,
+                    model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
@@ -149,21 +189,35 @@ class AIAgentManager:
                             "type": "json_schema",
                             "schema": response_format.model_json_schema(),
                         }
-                        if self.service == "together"
+                        if self.provider == "together"
                         else response_format
                     ),
                 )
-                if self.service == "together":
+                if self.provider == "together":
                     output = response.choices[0].message.content
                     output = response_format.model_validate_json(output)
                 else:
                     output = response.choices[0].message.parsed
+                log_openrouter_generation(
+                    response,
+                    request_kind="chat.completions.parse",
+                    requested_model=self.model,
+                    resolved_model=self.model,
+                    source="gen_agent.prompt_llm",
+                )
             else:
                 response = self.client.chat.completions.create(
-                    model=model,
+                    model=self.model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
+                )
+                log_openrouter_generation(
+                    response,
+                    request_kind="chat.completions",
+                    requested_model=self.model,
+                    resolved_model=self.model,
+                    source="gen_agent.prompt_llm",
                 )
                 output = response.choices[0].message.content
 
@@ -176,8 +230,8 @@ class AIAgentManager:
             return output
 
         except Exception as e:
-            print(f"Error calling LLM: {e}")
-            return f"Error: {str(e)}"
+            logger.error(f"Error calling LLM: {e}")
+            raise
 
     def generate_text(self, prompt: str) -> str:
         """Generate text using specified parameters"""
@@ -221,17 +275,31 @@ agent_manager = None
 
 
 def initialize_agent_manager(
-    api_key: str = None,
-    model: str = "meta-llama/Meta-Llama-3-8B-Instruct-Lite",
+    model: str,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
     max_tokens: int = 1000,
     temperature: float = 0.7,
     with_linebreak: bool = False,
 ) -> AIAgentManager:
-    """Initialize the global agent manager"""
+    """Initialize the global agent manager.
+
+    Args:
+        model: Model name to use
+        provider: LLM provider (defaults to DRBENCH_LLM_PROVIDER)
+        api_key: API key override
+        max_tokens: Maximum tokens for generation
+        temperature: Temperature for generation
+        with_linebreak: Whether to wrap output
+
+    Returns:
+        Initialized AIAgentManager instance
+    """
     global agent_manager
     agent_manager = AIAgentManager(
-        api_key=api_key,
         model=model,
+        provider=provider,
+        api_key=api_key,
         max_tokens=max_tokens,
         temperature=temperature,
         with_linebreak=with_linebreak,
@@ -239,21 +307,16 @@ def initialize_agent_manager(
     return agent_manager
 
 
-def get_agent_modules() -> List[Dict[str, Any]]:
-    """Get available agent modules"""
-    return AGENT_MODULES
-
-
-def get_available_models() -> List[str]:
-    """Get available AI models"""
-    return AVAILABLE_MODELS
+def get_available_providers() -> List[str]:
+    """Get available LLM providers"""
+    return AVAILABLE_PROVIDERS
 
 
 # Backward compatibility function
 def prompt_llm(prompt: str, with_linebreak: bool = False, model: str = None) -> str:
     """
-    Legacy function for backward compatibility
-    This function allows us to prompt an LLM via the Together API
+    Legacy function for backward compatibility.
+    Requires initialize_agent_manager() to be called first.
     """
     global agent_manager
     if not agent_manager:
@@ -268,13 +331,11 @@ def main():
     """Main function to demonstrate agent capabilities"""
     parser = argparse.ArgumentParser(description="AI Agent Manager")
     parser.add_argument(
-        "-k", "--api_key", type=str, default=None, help="Together AI API key"
+        "--model", type=str, required=True, help="Model name to use"
     )
     parser.add_argument(
-        "--list-modules", action="store_true", help="List available agent modules"
-    )
-    parser.add_argument(
-        "--list-models", action="store_true", help="List available AI models"
+        "--provider", type=str, default=None,
+        help=f"LLM provider (default: DRBENCH_LLM_PROVIDER env var). Options: {', '.join(AVAILABLE_PROVIDERS)}"
     )
     parser.add_argument(
         "--prompt",
@@ -283,34 +344,42 @@ def main():
         help="Text prompt to send to the model",
     )
     parser.add_argument(
-        "--model", type=str, default=AVAILABLE_MODELS[0], help="AI model to use"
+        "--run-dir",
+        type=str,
+        help="Output directory for logs (default: ./runs/gen_agent_<timestamp>)",
+    )
+    parser.add_argument(
+        "--list-providers", action="store_true", help="List available providers"
     )
 
     args = parser.parse_args()
 
-    # Initialize agent manager
-    manager = initialize_agent_manager(args.api_key)
-
-    if args.list_modules:
-        print("\nAvailable Agent Modules:")
+    if args.list_providers:
+        print("\nAvailable Providers:")
         print("-" * 50)
-        for module in AGENT_MODULES:
-            print(f"• {module['name']}: {module['description']}")
-            print(f"  Function: {module['function']}")
-            print(f"  Parameters: {', '.join(module['parameters'])}")
-            print()
-        return
-
-    if args.list_models:
-        print("\nAvailable AI Models:")
-        print("-" * 50)
-        for i, model in enumerate(AVAILABLE_MODELS, 1):
-            print(f"{i}. {model}")
+        for provider in AVAILABLE_PROVIDERS:
+            examples = EXAMPLE_MODELS.get(provider, [])
+            print(f"• {provider}: {', '.join(examples[:2])}")
         print()
         return
 
+    # Configure run dir for default-on logging
+    if args.run_dir:
+        run_dir = Path(args.run_dir)
+    else:
+        run_dir = Path(__file__).resolve().parent.parent / "runs" / f"gen_agent_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    set_run_config(RunConfig(model=args.model, run_dir=run_dir, llm_provider=args.provider))
+
+    # Initialize agent manager
+    manager = initialize_agent_manager(
+        model=args.model,
+        provider=args.provider,
+    )
+
     # Example usage
     print(f"\nUsing model: {args.model}")
+    print(f"Provider: {manager.provider}")
     print(f"Prompt: {args.prompt}")
     print("-" * 80)
 

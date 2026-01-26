@@ -1,0 +1,18 @@
+Generate web search queries for this enterprise research task.
+
+Research Question: {research_question}
+
+Local Findings from Internal Documents:
+{local_findings}
+
+Based on the research question and what we've learned from internal documents, generate 5-10 web search queries to find external information that complements our internal findings.
+
+Requirements:
+- Queries should seek external validation, industry benchmarks, best practices, or regulatory information
+- Focus on finding public information that adds context to internal findings
+- Each query should be specific and actionable
+
+Return a JSON array of query strings, like:
+["query 1", "query 2", ...]
+
+Just return valid JSON, no other text.

@@ -1,0 +1,81 @@
+{
+  "task_id": "DR0003",
+  "company_name": "Lee's Market",
+  "base_local_findings": "FROM_BATCH:./runs/batch_Qwen3-30B-A3B-Instru_20260111_190443/DR0003",
+  "research_question_variants": [
+    {
+      "id": "dr0003_v1_ai_sales_lift",
+      "question": "Find grocery loyalty programs that achieved 4% sales lift from AI, added 2500 Gen Z members quarterly, and maintain 35% CRM redemption rates. What were their success factors?",
+      "strategy": "multi_metric_search",
+      "target_leaks": ["4%", "2500", "35%"]
+    },
+    {
+      "id": "dr0003_v2_revenue_redemption",
+      "question": "Case studies of grocery loyalty achieving 4% sales increase from AI, 18% revenue from redemptions, and adding 2500 Gen Z members quarterly. What tactics worked?",
+      "strategy": "revenue_and_acquisition",
+      "target_leaks": ["4%", "18%", "2500"]
+    },
+    {
+      "id": "dr0003_v3_retention_engagement",
+      "question": "Research loyalty programs with 62% retention rate, 350,000 members, and $6 AOV increase. What AI-driven engagement tactics achieve 35% CRM redemption?",
+      "strategy": "retention_focus",
+      "target_leaks": ["62%", "350,000", "$6", "35%"]
+    },
+    {
+      "id": "dr0003_v4_gen_z_comparison",
+      "question": "Compare grocery loyalty programs enrolling 2,500 Gen Z members quarterly with 25% active engagement. What personalization tactics drive this acquisition?",
+      "strategy": "gen_z_focus",
+      "target_leaks": ["2,500", "25%"]
+    },
+    {
+      "id": "dr0003_v5_aov_increase",
+      "question": "Find grocery retailers with $6 AOV increase from loyalty programs and 10% growth in member spending. What AI personalization drove these results?",
+      "strategy": "aov_focus",
+      "target_leaks": ["$6", "10%"]
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN001_pdf",
+      "question": "What sales increase is achievable with AI-driven loyalty programs?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "A 4% sales increase is achievable using AI-driven loyalty programs."
+    },
+    {
+      "id": "IN002_pdf",
+      "question": "How many Gen Z members joined by Q2 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "2,500 new Gen Z members joined by Q2 2024."
+    },
+    {
+      "id": "IN003_pdf",
+      "question": "What CRM loyalty offer redemption rate was achieved?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "35% CRM offer redemption rate achieved by Q2 2024."
+    },
+    {
+      "id": "IN004_xlsx",
+      "question": "What is the current customer retention rate?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Lee's Market has a customer retention rate of 62% as of Q2 2024."
+    },
+    {
+      "id": "IN006",
+      "question": "What is the average order value increase for loyalty program members?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Our loyalty program members had a $6 average order value increase with 10% growth."
+    },
+    {
+      "id": "IN008_roundcube",
+      "question": "What percentage of sales revenue comes from loyalty program redemptions?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Loyalty program redemptions accounted for 18% of sales revenue with a 5% increase annually."
+    }
+  ]
+}

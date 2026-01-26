@@ -1,0 +1,95 @@
+{
+  "task_id": "DR0006",
+  "company_name": "MediConn Solutions",
+  "company_info": {
+    "name": "MediConn Solutions",
+    "industry": "Virtual/Remote Healthcare",
+    "headquarters": "Vancouver, Canada",
+    "employee_count": 250,
+    "annual_revenue": "$50M - $100M"
+  },
+  "local_findings": [
+    {
+      "text": "HIPAA compliance requirements are substantial. Recent internal discussions indicate projected costs of $2.5M for Q2 2024.",
+      "source": "Mattermost Chat"
+    },
+    {
+      "text": "Our compliance team has estimated that full HIPAA alignment will require significant investment.",
+      "source": "Compliance Strategy Document"
+    },
+    {
+      "text": "Q3 2025 compliance violations: 5 reported violations in state-specific regulations.",
+      "source": "Compliance Violations Report"
+    },
+    {
+      "text": "Provider insurance acceptance rates are tracking at 60% by Q3 2025.",
+      "source": "Insurance Acceptance Analysis"
+    },
+    {
+      "text": "HIPAA-related staff training will require approximately 1,200 hours of investment.",
+      "source": "Training Requirements Assessment"
+    }
+  ],
+  "research_question_variants": [
+    {
+      "question": "What compliance costs should we project for HIPAA implementation?"
+    },
+    {
+      "question": "Given our company size and industry, what are typical HIPAA compliance expenses?"
+    },
+    {
+      "question": "How do HIPAA implementation costs compare across virtual healthcare providers?"
+    },
+    {
+      "question": "What budget should we allocate for our projected compliance initiatives?"
+    },
+    {
+      "question": "What are industry benchmarks for healthcare data security compliance investments?"
+    },
+    {
+      "question": "How much do companies typically spend validating HIPAA compliance annually?"
+    },
+    {
+      "question": "What are the financial implications of full HIPAA alignment for healthcare platforms?"
+    },
+    {
+      "question": "Considering our compliance violations this quarter, what corrective costs should we anticipate?"
+    },
+    {
+      "question": "What investment level is needed to achieve 100% provider insurance acceptance?"
+    },
+    {
+      "question": "How do compliance training costs scale with staff requirements in healthcare?"
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN038",
+      "question": "What is the projected cost of HIPAA compliance in Q2 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Projected HIPAA compliance cost is $2.5M for Q2 2024."
+    },
+    {
+      "id": "qa_1756142539",
+      "question": "State-specific compliance violations Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "5 violations reported in Q3 2025."
+    },
+    {
+      "id": "qa_1756142505",
+      "question": "Insurance acceptance rate Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "60% of providers accept insurance by Q3 2025."
+    },
+    {
+      "id": "qa_1755631751",
+      "question": "HIPAA-related staff training hours Q2 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Staff training requires 1,200 hours."
+    }
+  ]
+}

@@ -15,6 +15,8 @@ from docx import Document
 from openai import OpenAI
 
 from drbench import config
+from drbench.config import get_run_config
+from drbench.openrouter_logging import log_openrouter_generation
 
 # Configure logging
 httpx_logger = logging.getLogger("httpx")
@@ -25,133 +27,121 @@ logger = logging.getLogger("source_reader")
 # Suppress warnings
 # warnings.filterwarnings("ignore")
 
-OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4.1"]
-
 logger = logging.getLogger(__name__)
 
 
-def prompt_llm(prompt, model="together_ai/meta-llama/Meta-Llama-3-8B-Instruct-Lite", **kwargs):
-    show_cost = kwargs.pop("show_cost", False)
-    if model in OPENAI_MODELS:
+def prompt_llm(prompt, model=None, **kwargs):
+    """Prompt the LLM using explicit provider routing.
+
+    Provider is controlled by RunConfig / DRBENCH_LLM_PROVIDER.
+    No URL sniffing, no silent fallbacks.
+    """
+    cfg = get_run_config()
+    provider = cfg.get_llm_provider()
+    model = model or cfg.model
+
+    if not model:
+        raise ValueError("LLM model is required (pass --model or set in RunConfig).")
+
+    messages = [{"role": "user", "content": prompt}]
+
+    if provider == "openai":
+        if not config.OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY is required for provider=openai")
         client = OpenAI(api_key=config.OPENAI_API_KEY)
-        if "response_format" in kwargs.keys():
+        if "response_format" in kwargs:
             response = client.responses.parse(
                 model=model,
-                input=[{"role": "user", "content": prompt}],
+                input=messages,
                 text_format=kwargs["response_format"],
             )
+            log_openrouter_generation(
+                response,
+                request_kind="responses.parse",
+                requested_model=model,
+                resolved_model=model,
+                source="agents.utils.prompt_llm",
+            )
             return response.output_parsed
-        llm = (
-            lambda content: client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": content}],
-                **kwargs,
-            )
-            .choices[0]
-            .message.content
-        )
-
-        return llm(prompt)
-
-    elif model == "vllm":
-        DEFAULT_VLLM_MODEL = "neuralmagic/Meta-Llama-405B-Instruct-FP8"
-        vllm_api_url = kwargs.pop("vllm_api_url", config.VLLM_API_URL or "http://localhost:8000")
-        vllm_api_key = kwargs.pop("vllm_api_key", config.VLLM_API_KEY)
-        vllm_model = kwargs.pop("vllm_model", config.VLLM_MODEL or DEFAULT_VLLM_MODEL)
-
-        client = OpenAI(base_url=f"{vllm_api_url}/v1", api_key=vllm_api_key)
-
-        messages = [
-            {"role": "user", "content": prompt},
-        ]
-
-        if "response_format" in kwargs.keys():
-            response = client.beta.chat.completions.parse(
-                model=vllm_model,
-                messages=messages,
-                response_format=kwargs["response_format"],
-            )
-            return response.choices[0].message.parsed
         response = client.chat.completions.create(
-            model=vllm_model,
+            model=model,
             messages=messages,
             **kwargs,
         )
+        log_openrouter_generation(
+            response,
+            request_kind="chat.completions",
+            requested_model=model,
+            resolved_model=model,
+            source="agents.utils.prompt_llm",
+        )
         return response.choices[0].message.content
 
-    elif model.startswith("azure:"):
+    if provider == "openrouter":
+        if not config.OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY is required for provider=openrouter")
+        client = OpenAI(
+            base_url=config.OPENROUTER_API_URL,
+            api_key=config.OPENROUTER_API_KEY,
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **kwargs,
+        )
+        log_openrouter_generation(
+            response,
+            request_kind="chat.completions",
+            requested_model=model,
+            resolved_model=model,
+            source="agents.utils.prompt_llm",
+        )
+        return response.choices[0].message.content
+
+    if provider == "vllm":
+        if not config.VLLM_API_URL:
+            raise ValueError("VLLM_API_URL is required for provider=vllm")
+        client = OpenAI(base_url=f"{config.VLLM_API_URL}/v1", api_key=config.VLLM_API_KEY or "not-needed")
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **kwargs,
+        )
+        log_openrouter_generation(
+            response,
+            request_kind="chat.completions",
+            requested_model=model,
+            resolved_model=model,
+            source="agents.utils.prompt_llm",
+        )
+        return response.choices[0].message.content
+
+    if provider == "azure":
+        if not (config.AZURE_API_KEY and config.AZURE_ENDPOINT and config.AZURE_API_VERSION):
+            raise ValueError("AZURE_API_KEY, AZURE_ENDPOINT, and AZURE_API_VERSION are required for provider=azure")
         from openai import AzureOpenAI
 
-        azure_api_key = config.AZURE_API_KEY
-        azure_endpoint = config.AZURE_ENDPOINT
-        azure_api_version = config.AZURE_API_VERSION
-        azure_deployment = model.split(":", 1)[1]  # Extract deployment name
-
+        azure_model = model.split(":", 1)[1] if model.startswith("azure:") else model
         client = AzureOpenAI(
-            api_version=azure_api_version,
-            api_key=azure_api_key,
-            azure_endpoint=azure_endpoint,
+            api_version=config.AZURE_API_VERSION,
+            api_key=config.AZURE_API_KEY,
+            azure_endpoint=config.AZURE_ENDPOINT,
         )
-
         response = client.chat.completions.create(
-            model=azure_deployment,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
-        )
-        return response.choices[0].message.content
-
-    elif model.startswith("openrouter/"):
-        openrouter_api_url = kwargs.pop("openrouter_api_url", config.OPENROUTER_API_URL)
-        openrouter_api_key = kwargs.pop("openrouter_api_key", config.OPENROUTER_API_KEY)
-        openrouter_model = model.removeprefix("openrouter/").strip()
-
-        client = OpenAI(base_url=f"{openrouter_api_url}/v1", api_key=openrouter_api_key)
-
-        client = OpenAI(
-            base_url=openrouter_api_url,
-            api_key=openrouter_api_key,
-        )
-
-        messages = [
-            {"role": "user", "content": prompt},
-        ]
-
-        if "response_format" in kwargs.keys():
-            response = client.beta.chat.completions.parse(
-                model=openrouter_model,
-                messages=messages,
-                response_format=kwargs["response_format"],
-            )
-            return response.choices[0].message.parsed
-        response = client.chat.completions.create(
-            model=openrouter_model,
+            model=azure_model,
             messages=messages,
             **kwargs,
         )
-        return response.choices[0].message.content
-
-    else:
-        import litellm
-        from litellm import completion
-
-        litellm._logging.handler.setLevel(logger.getEffectiveLevel())
-
-        # Calculate the number of tokens
-        tokens = len(prompt.split())
-
-        # Calculate and print estimated cost for each model
-        if show_cost:
-            logger.debug(f"\nNumber of tokens: {tokens}")
-            cost = (0.1 / 1_000_000) * tokens
-            logger.debug(f"Estimated cost for {model}: ${cost:.10f}\n")
-
-        # Make the API call using LiteLLM
-        response = completion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            **kwargs,
+        log_openrouter_generation(
+            response,
+            request_kind="chat.completions",
+            requested_model=model,
+            resolved_model=azure_model,
+            source="agents.utils.prompt_llm",
         )
         return response.choices[0].message.content
+
+    raise ValueError(f"Unknown provider: {provider}. Set DRBENCH_LLM_PROVIDER appropriately.")
 
 
 def break_report_to_insights(

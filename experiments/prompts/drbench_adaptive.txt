@@ -1,0 +1,79 @@
+Based on the research progress so far, suggest new actions with INTELLIGENT SOURCE COMPLEMENTARITY:
+
+Original Research Query: {research_question}
+Completed Actions: 3
+Latest Findings:
+{local_findings}
+
+Available Tools: ['LocalFileSearchTool', 'InternetSearchTool']
+
+Tool Selection Guidelines:
+    - Use "LocalFileSearchTool" for Searching and retrieving information from local document collections
+    - Use "InternetSearchTool" for Searching the web for current information and external sources
+
+Current Action Plan Status:
+{{
+  "total_actions": 5,
+  "completed": 3,
+  "failed": 0,
+  "pending": 2,
+  "in_progress": 0,
+  "current_iteration": 1,
+  "success_rate": 0.6
+}}
+
+SOURCE ANALYSIS:
+- Internal/Enterprise Sources Found: True
+- External Sources Found: False
+- Enterprise Chat/Files: False
+- Key Internal Insights: ["Found relevant information from local document collection"]
+
+ADAPTIVE STRATEGY - Based on what we've found:
+
+If we have STRONG INTERNAL FINDINGS:
+- Validate/support with external industry research (priority 0.6-0.7)
+- Search for related external trends that confirm internal direction
+- Look for case studies and best practices from similar organizations
+
+If we have LIMITED INTERNAL FINDINGS:
+- Intensify internal search with different keywords (priority 0.8-0.9)
+- Try alternative enterprise tools and search approaches
+- Search for internal documentation using related terminology
+
+If we have MIXED FINDINGS:
+- Fill gaps between internal and external perspectives
+- Look for specific URLs/resources mentioned in findings
+- Deep-dive into promising leads with targeted searches
+
+Suggest 0-5 new actions that would:
+1. COMPLEMENT existing source types (internal findings -> external validation, limited internal -> more internal search)
+2. Follow up on promising leads from the findings
+3. Fill gaps in the research methodology
+4. Explore new angles discovered in the findings
+5. Download or fetch specific resources mentioned
+6. Use available tools effectively based on source gaps
+7. Avoid repeating previous actions
+8. Prioritize based on source completeness and findings quality
+
+For each action, specify:
+    1. Action type (local_document_search, local_file_analysis, web_search, url_fetch, enterprise_api, mcp_query, synthesis)
+    2. Specific parameters needed
+    3. Priority (0.0 to 1.0) - HIGHER for filling source gaps
+    4. Expected output description
+    5. Preferred tool (choose from available tools above)
+    6. Rationale (why this action complements existing findings)
+
+Return a JSON array of new actions:
+[
+  {{
+    "type": "web_search",
+    "description": "Validate internal findings with external industry research",
+    "parameters": {{"query": "industry validation terms", "num_results": 8}},
+    "priority": 0.6,
+    "expected_output": "External validation data for internal insights",
+    "preferred_tool": "InternetSearchTool",
+    "rationale": "Supporting strong internal findings with external context"
+  }}
+]
+
+Create valid JSON only, no other text.

@@ -1,11 +1,14 @@
 # suppress warnings
 import warnings
+from datetime import datetime
+from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
 from drbench import task_loader
 from drbench.agents.drbench_agent.drbench_agent import DrBenchAgent
 from drbench.agents.basic_agent import BasicAgent
+from drbench.config import RunConfig, set_run_config
 from drbench.score_report import score_report
 
 
@@ -13,6 +16,12 @@ if __name__ == "__main__":
     """
     This Evaluate the Ability for an Agent to Generate a DR Report directly from the Local Files.
     """
+    # Provide a run_dir for default-on logging.
+    repo_root = Path(__file__).resolve().parent
+    run_dir = repo_root / "runs" / f"minimal_local_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    set_run_config(RunConfig(run_dir=run_dir))
+
     # (1) Load one task
     # ----------------------
     task = task_loader.get_task_from_id(task_id="SANITY0")

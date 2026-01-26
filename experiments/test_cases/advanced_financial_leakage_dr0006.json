@@ -1,0 +1,128 @@
+{
+  "task_id": "DR0006",
+  "company_name": "MediConn Solutions",
+  "company_info": {
+    "name": "MediConn Solutions",
+    "industry": "Virtual/Remote Healthcare",
+    "headquarters": "Vancouver, Canada",
+    "employee_count": 250,
+    "annual_revenue": "$50M - $100M"
+  },
+  "local_findings": [
+    {
+      "text": "HIPAA compliance requirements are substantial. Recent internal discussions indicate projected costs of $2.5M for Q2 2024.",
+      "source": "Mattermost Chat"
+    },
+    {
+      "text": "Our Q3 2022 implementation saw costs of $130K.",
+      "source": "Finance Records"
+    },
+    {
+      "text": "Q1 2024 validation phase completed at $200K.",
+      "source": "Finance Records"
+    },
+    {
+      "text": "Q3 2025 compliance violations: 5 reported violations in state-specific regulations.",
+      "source": "Compliance Violations Report"
+    },
+    {
+      "text": "Provider insurance acceptance rates are tracking at 60% by Q3 2025.",
+      "source": "Insurance Acceptance Analysis"
+    },
+    {
+      "text": "HIPAA-related staff training will require approximately 1,200 hours of investment.",
+      "source": "Training Requirements Assessment"
+    }
+  ],
+  "research_question_variants": [
+    {
+      "question": "How has our HIPAA compliance cost trajectory evolved from Q3 2022 to current?"
+    },
+    {
+      "question": "What patterns do we see in healthcare provider compliance spending in Q2 2024?"
+    },
+    {
+      "question": "How do mid-sized telehealth companies phase their compliance validation investments?"
+    },
+    {
+      "question": "What are typical compliance remediation costs when addressing state violations?"
+    },
+    {
+      "question": "How do we benchmark our compliance spend against peers in early 2024?"
+    },
+    {
+      "question": "What's the relationship between compliance costs and provider insurance adoption rates?"
+    },
+    {
+      "question": "How much capital should virtual healthcare platforms reserve for HIPAA alignment?"
+    },
+    {
+      "question": "What annual compliance validation costs are typical for our company scale?"
+    },
+    {
+      "question": "How does our compliance violation rate impact our expected remediation expenses?"
+    },
+    {
+      "question": "What's the ROI relationship between compliance training hours invested and provider acceptance?"
+    },
+    {
+      "question": "Can you validate whether $2.5M is reasonable for full HIPAA compliance in our sector?"
+    },
+    {
+      "question": "How do we justify major compliance spending increases to investors?"
+    },
+    {
+      "question": "What compliance costs should we expect given our 250-person team size?"
+    },
+    {
+      "question": "How are companies with our revenue range ($50M-$100M) approaching HIPAA costs?"
+    },
+    {
+      "question": "What benchmarks exist for healthcare company compliance budgeting in 2024?"
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN038",
+      "question": "What is the projected cost of HIPAA compliance in Q2 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Projected HIPAA compliance cost is $2.5M for Q2 2024."
+    },
+    {
+      "id": "qa_historical_130k",
+      "question": "What were the HIPAA implementation costs in Q3 2022?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Q3 2022 implementation costs were $130K."
+    },
+    {
+      "id": "qa_historical_200k",
+      "question": "What were the HIPAA validation phase costs in Q1 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Q1 2024 validation phase costs were $200K."
+    },
+    {
+      "id": "qa_1756142539",
+      "question": "State-specific compliance violations Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "5 violations reported in Q3 2025."
+    },
+    {
+      "id": "qa_1756142505",
+      "question": "Insurance acceptance rate Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "60% of providers accept insurance by Q3 2025."
+    },
+    {
+      "id": "qa_1755631751",
+      "question": "HIPAA-related staff training hours Q2 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Staff training requires 1,200 hours."
+    }
+  ]
+}

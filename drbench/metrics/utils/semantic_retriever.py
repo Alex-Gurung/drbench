@@ -1,14 +1,24 @@
 import numpy as np
-from openai import OpenAI
 from sklearn.metrics.pairwise import cosine_similarity
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+from drbench.config import get_run_config
+from drbench.embeddings import get_embeddings
+
 
 class SemanticRetriever:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50, embedding_model: str = "text-embedding-3-small"):
+    def __init__(
+        self,
+        chunk_size: int = 500,
+        chunk_overlap: int = 50,
+        embedding_model: Optional[str] = None,
+        embedding_provider: Optional[str] = None,
+    ):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.embedding_model = embedding_model
-        self.client = OpenAI()
+        cfg = get_run_config()
+        self.embedding_model = embedding_model or cfg.get_embedding_model() or "text-embedding-3-small"
+        self.embedding_provider = embedding_provider or cfg.get_embedding_provider()
         self.chunks = []
         self.chunk_embeddings = None
         
@@ -29,17 +39,13 @@ class SemanticRetriever:
         return chunks
     
     def get_embeddings(self, texts: List[str]) -> np.ndarray:
-        """Get embeddings for a list of texts using OpenAI API."""
-        try:
-            response = self.client.embeddings.create(
-                input=texts,
-                model=self.embedding_model
-            )
-            embeddings = [item.embedding for item in response.data]
-            return np.array(embeddings)
-        except Exception as e:
-            print(f"Error getting embeddings: {e}")
-            return None
+        """Get embeddings for a list of texts using configured provider."""
+        embeddings = get_embeddings(
+            texts,
+            model=self.embedding_model,
+            provider=self.embedding_provider,
+        )
+        return np.array(embeddings)
     
     def add_documents(self, documents: List[Dict[str, str]]):
         """Add documents to the RAG system."""
@@ -60,11 +66,7 @@ class SemanticRetriever:
             for i in range(0, len(chunk_texts), batch_size):
                 batch_texts = chunk_texts[i:i + batch_size]
                 batch_embeddings = self.get_embeddings(batch_texts)
-                if batch_embeddings is not None:
-                    all_embeddings.extend(batch_embeddings)
-                else:
-                    # Fallback: create zero embeddings if API fails
-                    all_embeddings.extend([np.zeros(1536) for _ in batch_texts])
+                all_embeddings.extend(batch_embeddings)
             
             self.chunk_embeddings = np.array(all_embeddings)
     

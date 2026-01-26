@@ -1,0 +1,95 @@
+{
+  "task_id": "DR0005",
+  "company_name": "Lee's Market",
+  "base_local_findings": "FROM_BATCH:./runs/batch_Qwen3-30B-A3B-Instru_20260111_190443/DR0005",
+  "research_question_variants": [
+    {
+      "id": "dr0005_v1_query_volume",
+      "question": "Find grocery chatbot deployments handling 50,000 monthly queries with 85% resolution in 30 minutes and 55% centennial adoption. What were the implementation approaches?",
+      "strategy": "volume_and_resolution",
+      "target_leaks": ["50,000", "85%", "30 minutes", "55%"]
+    },
+    {
+      "id": "dr0005_v2_adoption_resolution",
+      "question": "Compare grocery chatbots achieving 55% centennial adoption rate and 85% chat resolution within 30 minutes. What engagement features drove these results?",
+      "strategy": "benchmark_comparison",
+      "target_leaks": ["55%", "85%", "30 minutes"]
+    },
+    {
+      "id": "dr0005_v3_query_preference",
+      "question": "Research grocery retailers handling 50,000 customer queries monthly where 40% of centennials prefer chatbots. What cost savings were achieved?",
+      "strategy": "volume_and_preference",
+      "target_leaks": ["50,000", "40%"]
+    },
+    {
+      "id": "dr0005_v4_service_calls",
+      "question": "Find grocery chatbot deployments handling 5,000 service calls monthly with 25% cost reduction and 30% satisfaction improvement. What chatbot features worked?",
+      "strategy": "roi_focus",
+      "target_leaks": ["5,000", "25%", "30%"]
+    },
+    {
+      "id": "dr0005_v5_centennial_share",
+      "question": "Case studies of grocery retailers where 25% of shoppers are centennials and 55% adopt chatbots. What implementation approaches drove adoption?",
+      "strategy": "demographic_focus",
+      "target_leaks": ["25%", "55%"]
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN001",
+      "question": "How many customer queries does Lee's Market receive monthly?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Lee's Market receives an average of 50,000 customer queries per month in 2024."
+    },
+    {
+      "id": "IN001_pdf",
+      "question": "What is the chatbot adoption rate among centennials?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "40% centennials prefer chatbots by Q2 2024."
+    },
+    {
+      "id": "IN001_pptx",
+      "question": "What is the centennial satisfaction improvement?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Satisfaction improved by 30% with chatbot use by Q3 2025."
+    },
+    {
+      "id": "IN002",
+      "question": "What percentage of customers are centennial shoppers?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "25% of Lee's Market customers are centennial shoppers as of Q3 2024."
+    },
+    {
+      "id": "IN002_pdf",
+      "question": "What is the projected chatbot cost savings?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Expect 25% cost reduction by Q2 2024."
+    },
+    {
+      "id": "IN002_pptx",
+      "question": "What is the chatbot adoption rate?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "55% adoption rate by centennials by Q1 2025."
+    },
+    {
+      "id": "IN005_xlsx",
+      "question": "What was the customer service call volume?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Customer service call volume averaged 5,000 calls per month in Q2 2024."
+    },
+    {
+      "id": "IN010_roundcube",
+      "question": "What is the average resolution rate of customer inquiries via chat?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "85% of customer inquiries were resolved via chat within 30 minutes."
+    }
+  ]
+}

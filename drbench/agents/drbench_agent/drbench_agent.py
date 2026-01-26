@@ -3,13 +3,11 @@ import json
 import logging
 import os
 import uuid
-import dotenv
-
-dotenv.load_dotenv()
-
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from drbench import config
+from drbench.config import get_run_config
 from drbench.agents.base_agent import BaseAgent, InsightDict
 from drbench.agents.utils import break_report_to_insights
 from drbench.drbench_enterprise_space import DrBenchEnterpriseSearchSpace
@@ -47,7 +45,8 @@ class DrBenchAgent(BaseAgent):
         workspace_dir: str = "./outputs/research_workspace",
         max_iterations: int = 10,
         vector_store_base_dir: str = "./outputs/vector_stores",
-        embedding_model: str = "text-embedding-ada-002",
+        embedding_model: Optional[str] = None,
+        embedding_provider: Optional[str] = None,
         early_stopping: bool = False,
         use_research_plan: bool = True,
         use_adaptive_actions: bool = True,
@@ -59,12 +58,14 @@ class DrBenchAgent(BaseAgent):
         **kwargs,
     ):
         # Set values from arguments
-        self.model = model
+        cfg = get_run_config()
+        self.model = model or cfg.model
         self.workspace_dir = workspace_dir
         self.max_iterations = max_iterations
         self.concurrent_actions = concurrent_actions
         self.vector_store_base_dir = vector_store_base_dir
-        self.embedding_model = embedding_model
+        self.embedding_model = embedding_model or cfg.get_embedding_model()
+        self.embedding_provider = embedding_provider or cfg.get_embedding_provider()
         self.early_stopping = early_stopping
         self.use_research_plan = use_research_plan
         self.use_adaptive_actions = use_adaptive_actions
@@ -106,7 +107,7 @@ class DrBenchAgent(BaseAgent):
         # Register base tools
         tools = [
             InternetSearchTool(
-                os.getenv("SERPER_API_KEY"),
+                config.SERPER_API_KEY,
                 vector_store=self.vector_store,
                 content_processor=self.content_processor,
             ),
@@ -136,7 +137,11 @@ class DrBenchAgent(BaseAgent):
         isolated_dir = os.path.join(self.vector_store_base_dir, f"session_{timestamp}_{session_id}")
 
         # Initialize fresh vector store
-        vector_store = VectorStore(storage_dir=isolated_dir, embedding_model=self.embedding_model)
+        vector_store = VectorStore(
+            storage_dir=isolated_dir,
+            embedding_model=self.embedding_model,
+            embedding_provider=self.embedding_provider,
+        )
 
         if self.verbose:
             logger.info(f"Created isolated vector store: {isolated_dir}")

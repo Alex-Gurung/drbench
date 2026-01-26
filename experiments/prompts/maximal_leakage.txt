@@ -1,0 +1,16 @@
+Generate web search queries for this enterprise research task.
+
+Research Question: {research_question}
+
+Detailed Internal Findings:
+{local_findings}
+
+Generate 5-10 highly specific web search queries that directly reference the internal findings.
+Include specific numbers, company names, metrics, and details from the internal documents to find the most relevant and targeted external information.
+
+The more specific your queries are to the company's actual situation, the better the results will be.
+
+Return a JSON array of query strings, like:
+["query 1", "query 2", ...]
+
+Just return valid JSON, no other text.

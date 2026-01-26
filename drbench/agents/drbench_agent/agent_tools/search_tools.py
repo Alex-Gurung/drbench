@@ -6,6 +6,8 @@ from typing import Any, Dict
 import requests
 
 from .base import ResearchContext, Tool
+from drbench.config import get_run_config
+from drbench.internet_search_logging import log_internet_search
 
 logger = logging.getLogger(__name__)
 
@@ -32,28 +34,43 @@ class InternetSearchTool(Tool):
     def execute(self, query: str, context: ResearchContext) -> Dict[str, Any]:
         """Execute internet search with URL content fetching and standardized output"""
 
+        cfg = get_run_config()
+        if cfg.no_web:
+            result = self.create_error_output(
+                "internet_search",
+                query,
+                "Web access disabled (--no-web).",
+            )
+            # Log if enabled (will raise if run_dir missing)
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result
+
         if not self.api_key:
-            return self.create_error_output("internet_search", query, "API key not provided for internet search")
+            result = self.create_error_output(
+                "internet_search",
+                query,
+                "API key not provided for internet search",
+            )
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result
 
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         payload = json.dumps({"q": query, "num": 10})  # Number of results
 
-        # Debug logging for 400 error investigation
-        logger.debug(f"🔍 InternetSearchTool Debug Info:")
-        logger.debug(f"  URL: {self.base_url}")
-        logger.debug(f"  Query: {repr(query)}")
-        logger.debug(f"  Query length: {len(query)} chars")
-        logger.debug(f"  Query bytes: {len(query.encode('utf-8'))} bytes")
-        logger.debug(f"  Headers: {headers}")
-        logger.debug(f"  Payload: {payload}")
-        logger.debug(f"  Payload length: {len(payload)} bytes")
+        logger.debug("InternetSearchTool query=%r", query)
 
         try:
             response = requests.post(self.base_url, headers=headers, data=payload, timeout=30)
-            
-            # Log response details for debugging
-            logger.debug(f"  Response status: {response.status_code}")
-            logger.debug(f"  Response headers: {dict(response.headers)}")
             
             response.raise_for_status()
             results = response.json()
@@ -77,7 +94,7 @@ class InternetSearchTool(Tool):
             content_stored_count = 0
             
             if self.content_processor and search_results:
-                logger.info(f"🌐 Fetching content from top {min(5, len(search_results))} search results...")
+                logger.info("Fetching content from top %s search results...", min(5, len(search_results)))
                 
                 for i, result in enumerate(search_results[:5]):  # Fetch top 5 URLs
                     url = result.get("link")
@@ -133,9 +150,13 @@ class InternetSearchTool(Tool):
                                 "stored_in_vector": False
                             })
                             
-                logger.info(f"✅ Fetched content from {len(fetched_content)} URLs, {content_stored_count} stored in vector store")
+                logger.info(
+                    "Fetched content from %s URLs, %s stored in vector store",
+                    len(fetched_content),
+                    content_stored_count,
+                )
 
-            return self.create_success_output(
+            result = self.create_success_output(
                 tool_name="internet_search",
                 query=query,
                 results=search_results,
@@ -149,44 +170,53 @@ class InternetSearchTool(Tool):
                 content_stored_in_vector=content_stored_count,
                 stored_in_vector=content_stored_count > 0
             )
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result
 
         except requests.exceptions.RequestException as e:
-            # Enhanced error logging for 400 errors
-            error_details = {
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "query": repr(query),
-                "url": self.base_url,
-                "headers": headers,
-                "payload": payload
-            }
-            
-            # If we have a response, log its details
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_details.update({
-                        "response_status": e.response.status_code,
-                        "response_headers": dict(e.response.headers),
-                        "response_text": e.response.text[:1000]  # First 1000 chars
-                    })
-                    logger.error(f"🚨 HTTP Error {e.response.status_code}: {error_details}")
-                    
-                    # Special handling for 400 errors
-                    if e.response.status_code == 400:
-                        logger.error(f"🔴 400 BAD REQUEST DETAILS:")
-                        logger.error(f"  Full response text: {e.response.text}")
-                        logger.error(f"  Request payload that caused error: {payload}")
-                        logger.error(f"  Original query: {repr(query)}")
-                        
-                except Exception as log_err:
-                    logger.error(f"Failed to log response details: {log_err}")
-            else:
-                logger.error(f"🚨 Network Error (no response): {error_details}")
-            
-            return self.create_error_output("internet_search", query, f"Network error: {str(e)}")
+            logger.error("Internet search request failed: %s", e)
+            result = self.create_error_output(
+                "internet_search",
+                query,
+                f"Network error: {str(e)}",
+            )
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result
         except json.JSONDecodeError as e:
-            logger.error(f"🚨 JSON Decode Error: {str(e)} - Response text: {getattr(response, 'text', 'No response text')}")
-            return self.create_error_output("internet_search", query, f"Invalid JSON response: {str(e)}")
+            logger.error("JSON decode error: %s", e)
+            result = self.create_error_output(
+                "internet_search",
+                query,
+                f"Invalid JSON response: {str(e)}",
+            )
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result
         except Exception as e:
-            logger.error(f"🚨 Unexpected Error: {type(e).__name__}: {str(e)}")
-            return self.create_error_output("internet_search", query, f"Search failed: {str(e)}")
+            logger.error("Unexpected error in internet search: %s", e)
+            result = self.create_error_output(
+                "internet_search",
+                query,
+                f"Search failed: {str(e)}",
+            )
+            log_internet_search(
+                tool="internet_search",
+                query=query,
+                params={"query": query},
+                result=result,
+            )
+            return result

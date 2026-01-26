@@ -3,6 +3,7 @@ Local document processing tools for DrBench Agent
 Handles bulk ingestion of document folders and intelligent file search
 """
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from drbench.agents.utils import prompt_llm
+from drbench.local_search_logging import log_local_document_search
 from .base import ResearchContext, Tool
 from .content_processor import ContentProcessor
 
@@ -594,6 +597,7 @@ class LocalFileSearchTool(Tool):
         try:
             # Parse search parameters
             params = self._parse_search_query(query)
+            params["raw_query"] = query
             search_query = params.get("query", query)
             file_type_filter = params.get("file_type_filter")
             folder_filter = params.get("folder_filter")
@@ -633,11 +637,13 @@ class LocalFileSearchTool(Tool):
             local_results = local_results[:top_k]
 
             if not local_results:
-                return self.create_error_output(
+                result = self.create_error_output(
                     "local_document_search",
                     query,
                     "No relevant local documents found. Make sure documents have been ingested first.",
                 )
+                log_local_document_search(search_query, params, result)
+                return result
 
             # Synthesize results
             synthesis = self._synthesize_local_results(local_results, search_query, context)
@@ -645,8 +651,6 @@ class LocalFileSearchTool(Tool):
             # Store synthesis in vector store with source tracking
             source_doc_ids = [result.get("doc_id") for result in local_results if result.get("doc_id")]
             if self.vector_store and synthesis and source_doc_ids:
-                from datetime import datetime
-
                 synthesis_metadata = {
                     "tool_used": "local_document_search",
                     "type": "ai_synthesis_with_sources",
@@ -672,7 +676,7 @@ class LocalFileSearchTool(Tool):
                 if metadata.get("folder_path"):
                     folders.add(metadata["folder_path"])
 
-            return self.create_success_output(
+            result = self.create_success_output(
                 tool_name="local_document_search",
                 query=search_query,
                 synthesis=synthesis,
@@ -698,10 +702,14 @@ class LocalFileSearchTool(Tool):
                     ],
                 },
             )
+            log_local_document_search(search_query, params, result)
+            return result
 
         except Exception as e:
             logger.error(f"Local file search failed: {e}")
-            return self.create_error_output("local_document_search", query, str(e))
+            result = self.create_error_output("local_document_search", query, str(e))
+            log_local_document_search(query, {"raw_query": query}, result)
+            return result
 
     def _parse_search_query(self, query: str) -> Dict[str, Any]:
         """Parse search parameters from query string"""
@@ -753,10 +761,6 @@ class LocalFileSearchTool(Tool):
 
     def _synthesize_local_results(self, results: List[Dict], query: str, context: ResearchContext) -> str:
         """Synthesize search results from local documents with proper citations"""
-        import json
-
-        from drbench.agents.utils import prompt_llm
-
         if not results:
             return "No local documents found matching the query."
 

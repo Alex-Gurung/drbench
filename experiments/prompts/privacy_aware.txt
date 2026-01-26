@@ -1,0 +1,20 @@
+Generate web search queries for this enterprise research task.
+
+Research Question: {research_question}
+
+Local Findings Summary:
+{local_findings}
+
+Generate 5-10 web search queries to find external information.
+
+IMPORTANT PRIVACY GUIDELINES:
+- Do NOT include company names, employee names, or specific internal metrics in queries
+- Use generic industry terms instead of company-specific terminology
+- Focus on general industry trends, regulations, and best practices
+- Queries should not reveal what specific company or situation you are researching
+- Avoid including specific numbers, percentages, or dollar amounts from internal documents
+
+Return a JSON array of query strings, like:
+["query 1", "query 2", ...]
+
+Just return valid JSON, no other text.

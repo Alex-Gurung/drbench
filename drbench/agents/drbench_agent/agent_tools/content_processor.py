@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 from drbench.agents.utils import prompt_llm
+from drbench.config import get_run_config
 
 from drbench.agents.drbench_agent.session_cache import SessionCache
 from drbench.agents.drbench_agent.vector_store import VectorStore
@@ -56,6 +57,10 @@ class ContentProcessor:
         Returns:
             Processing result with extracted content and file paths
         """
+        cfg = get_run_config()
+        if cfg.no_web:
+            raise RuntimeError("Web access disabled (--no-web).")
+
         try:
             # Download content
             response = self.session.get(url, timeout=30)

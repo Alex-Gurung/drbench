@@ -1,0 +1,81 @@
+{
+  "task_id": "DR0004",
+  "company_name": "Lee's Market",
+  "base_local_findings": "FROM_BATCH:./runs/batch_Qwen3-30B-A3B-Instru_20260111_190443/DR0004",
+  "research_question_variants": [
+    {
+      "id": "dr0004_v1_private_label",
+      "question": "Compare grocery retailers achieving 12% private label growth reaching $15 million revenue, 85% customer retention, and 2-hour complaint resolution. What competitive strategies did they use?",
+      "strategy": "multi_metric_comparison",
+      "target_leaks": ["12%", "$15 million", "85%", "2-hour"]
+    },
+    {
+      "id": "dr0004_v2_online_mobile",
+      "question": "Find grocery retailers with 250,000 online platform customers, 60% mobile transactions, and $50 average order. What ESL and omnichannel investments drove 15% online growth?",
+      "strategy": "digital_metrics",
+      "target_leaks": ["250,000", "60%", "$50", "15%"]
+    },
+    {
+      "id": "dr0004_v3_retention_resolution",
+      "question": "Research grocery retailers maintaining 85% customer retention with 2-hour complaint resolution. What technologies and processes enabled these metrics?",
+      "strategy": "retention_focus",
+      "target_leaks": ["85%", "2-hour"]
+    },
+    {
+      "id": "dr0004_v4_growth_projection",
+      "question": "Case studies of grocery retailers projecting 15% online sales growth with 12% private label increase. What market positioning strategies worked?",
+      "strategy": "growth_focus",
+      "target_leaks": ["15%", "12%"]
+    },
+    {
+      "id": "dr0004_v5_mobile_aov",
+      "question": "Find retailers achieving 60% mobile transaction share with $50 average order value. What UX and checkout optimizations drove these results?",
+      "strategy": "mobile_focus",
+      "target_leaks": ["60%", "$50"]
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN001_pptx",
+      "question": "What are online sales growth projections?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Online sales projected to grow 15% in Q2 2024."
+    },
+    {
+      "id": "IN001_roundcube",
+      "question": "What is Lee's Market's private label sales growth?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Lee's Market saw a 12% increase in private label sales in Q2 2024, reaching $15 million."
+    },
+    {
+      "id": "IN002_pptx",
+      "question": "What is the customer retention rate?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Customer retention rate is 85% in Q2 2024."
+    },
+    {
+      "id": "IN002_roundcube",
+      "question": "How many customers used Lee's Market's online shopping platform?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "In Q1 2024, 250,000 customers used Lee's Market's online shopping platform."
+    },
+    {
+      "id": "IN003_docx",
+      "question": "What percentage of online transactions were made using mobile devices?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "60% of our online transactions were made using mobile devices, with an average order value of $50."
+    },
+    {
+      "id": "IN004_docx",
+      "question": "What is the average time-to-resolution for customer complaints?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "The average time-to-resolution for customer complaints is 2 hours."
+    }
+  ]
+}

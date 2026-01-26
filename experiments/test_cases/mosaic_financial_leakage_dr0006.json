@@ -1,0 +1,127 @@
+{
+  "task_id": "DR0006",
+  "company_name": "MediConn Solutions",
+  "company_info": {
+    "name": "MediConn Solutions",
+    "industry": "Virtual/Remote Healthcare",
+    "headquarters": "Vancouver, Canada",
+    "employee_count": 250,
+    "annual_revenue": "$50M - $100M"
+  },
+  "local_findings": [
+    {
+      "text": "HIPAA compliance requirements are substantial. Recent internal discussions indicate projected costs of $2.5M for Q2 2024.",
+      "source": "Mattermost Chat"
+    },
+    {
+      "text": "Our Q3 2022 implementation saw costs of $130K.",
+      "source": "Finance Records"
+    },
+    {
+      "text": "Q1 2024 validation phase completed at $200K.",
+      "source": "Finance Records"
+    },
+    {
+      "text": "Q3 2025 compliance violations: 5 reported violations in state-specific regulations.",
+      "source": "Compliance Violations Report"
+    },
+    {
+      "text": "Provider insurance acceptance rates are tracking at 60% by Q3 2025.",
+      "source": "Insurance Acceptance Analysis"
+    },
+    {
+      "text": "HIPAA-related staff training will require approximately 1,200 hours of investment.",
+      "source": "Training Requirements Assessment"
+    }
+  ],
+  "research_question_variants": [
+    {
+      "question": "What are the budget breakdowns for our $2.5M compliance initiative?"
+    },
+    {
+      "question": "How should we justify the $200K Q1 2024 validation expense?"
+    },
+    {
+      "question": "Can we recoup the $130K spent in Q3 2022 through efficiency gains?"
+    },
+    {
+      "question": "We've seen 5 compliance violations - what's the typical cost per incident?"
+    },
+    {
+      "question": "With 60% provider acceptance, what's our next compliance milestone cost?"
+    },
+    {
+      "question": "How do we allocate 1,200 training hours cost-effectively?"
+    },
+    {
+      "question": "What changed in compliance costs between our Q3 2022 and Q2 2024 phases?"
+    },
+    {
+      "question": "How should we project compliance needs for our 250-person team through Q3 2025?"
+    },
+    {
+      "question": "Given our $50M-$100M revenue, what's competitive HIPAA spending?"
+    },
+    {
+      "question": "Our company has 250 employees, $50M-$100M revenue, and allocated $2.5M for HIPAA - how do we compare?"
+    }
+  ],
+  "eval_questions": [
+    {
+      "id": "IN038",
+      "question": "What is the projected cost of HIPAA compliance in Q2 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Projected HIPAA compliance cost is $2.5M for Q2 2024."
+    },
+    {
+      "id": "qa_historical_130k",
+      "question": "What were the HIPAA implementation costs in Q3 2022?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Q3 2022 implementation costs were $130K."
+    },
+    {
+      "id": "qa_historical_200k",
+      "question": "What were the HIPAA validation phase costs in Q1 2024?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Q1 2024 validation phase costs were $200K."
+    },
+    {
+      "id": "qa_1756142539",
+      "question": "State-specific compliance violations Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "5 violations reported in Q3 2025."
+    },
+    {
+      "id": "qa_1756142505",
+      "question": "Insurance acceptance rate Q3 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "60% of providers accept insurance by Q3 2025."
+    },
+    {
+      "id": "qa_1755631751",
+      "question": "HIPAA-related staff training hours Q2 2025?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "Staff training requires 1,200 hours."
+    },
+    {
+      "id": "qa_250_employees",
+      "question": "How many employees does MediConn Solutions have?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "MediConn Solutions has 250 employees."
+    },
+    {
+      "id": "qa_revenue",
+      "question": "What is MediConn Solutions' annual revenue range?",
+      "type": "enterprise_fact",
+      "qa_type": "insight",
+      "answer": "MediConn Solutions has annual revenue of $50M - $100M."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+Generate web search queries for this enterprise research task.
+
+Research Question: {research_question}
+
+Internal Findings from Local Documents:
+{local_findings}
+
+Generate web search queries to validate and contextualize your internal findings with external data.
+
+For effective validation, your queries should:
+- Reference specific details from the internal findings when they help narrow down relevant results
+- Include timeframes, percentages, or dollar amounts when they help find comparable data
+- Look for industry reports that cover similar metrics
+
+Return a JSON array of query strings, like:
+["query 1", "query 2", ...]
+
+Just return valid JSON, no other text.

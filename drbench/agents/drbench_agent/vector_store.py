@@ -9,36 +9,10 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from drbench.agents.drbench_agent.session_cache import SessionCache
+from drbench.config import get_run_config
+from drbench.embeddings import get_embeddings
 
 logger = logging.getLogger(__name__)
-
-
-def get_embeddings(texts: List[str], model: str = "text-embedding-ada-002") -> List[List[float]]:
-    """
-    OpenAI embedding function to convert texts into vectors.
-
-    Args:
-        texts: List of texts to embed
-        model: Embedding model to use
-
-    Returns:
-        List of embedding vectors
-    """
-    try:
-        from openai import OpenAI
-
-        # Initialize OpenAI client (uses OPENAI_API_KEY from env by default)
-        client = OpenAI()
-
-        # Get embeddings
-        response = client.embeddings.create(input=texts, model=model)
-
-        return [item.embedding for item in response.data]
-
-    except ImportError:
-        raise ImportError("OpenAI library not installed. Run: pip install openai")
-    except Exception as e:
-        raise Exception(f"OpenAI embedding error: {e}")
 
 
 class VectorStore:
@@ -47,12 +21,15 @@ class VectorStore:
     def __init__(
         self,
         storage_dir: str = "./vector_store",
-        embedding_model: str = "text-embedding-ada-002",
+        embedding_model: Optional[str] = None,
+        embedding_provider: Optional[str] = None,
         max_length: int = 8192,
         session_cache: Optional[SessionCache] = None,
     ):
         self.storage_dir = storage_dir
-        self.embedding_model = embedding_model
+        cfg = get_run_config()
+        self.embedding_model = embedding_model or cfg.get_embedding_model()
+        self.embedding_provider = embedding_provider or cfg.get_embedding_provider()
         self.max_length = max_length
         self.session_cache = session_cache
         self._lock = threading.RLock()  # Reentrant lock for thread safety
@@ -96,22 +73,18 @@ class VectorStore:
     def _save_data(self):
         """Save documents and embeddings to disk"""
         with self._lock:
-            try:
-                # Save documents metadata
-                with open(self.documents_file, "w", encoding="utf-8") as f:
-                    json.dump(self.documents, f, indent=2, ensure_ascii=False)
+            # Save documents metadata
+            with open(self.documents_file, "w", encoding="utf-8") as f:
+                json.dump(self.documents, f, indent=2, ensure_ascii=False)
 
-                # Save embeddings
-                if self.embeddings is not None:
-                    np.save(self.embeddings_file, self.embeddings)
+            # Save embeddings
+            if self.embeddings is not None:
+                np.save(self.embeddings_file, self.embeddings)
 
-                # Save index
-                index_data = {"doc_ids": self.doc_ids}
-                with open(self.index_file, "w") as f:
-                    json.dump(index_data, f, indent=2)
-
-            except Exception as e:
-                logger.error(f"Error saving vector store data: {e}")
+            # Save index
+            index_data = {"doc_ids": self.doc_ids}
+            with open(self.index_file, "w") as f:
+                json.dump(index_data, f, indent=2)
 
     def _reset_store(self):
         """Reset the vector store"""
@@ -251,25 +224,23 @@ class VectorStore:
                     query_context=metadata.get("query_context"),
                 )
 
-            # Generate embedding for the content
-            try:
-                embedding = get_embeddings([content[: self.max_length]], self.embedding_model)[0]
+            # Generate embedding for the content (fail loudly if embedding fails)
+            embedding = get_embeddings(
+                [content[: self.max_length]],
+                model=self.embedding_model,
+                provider=self.embedding_provider,
+            )[0]
 
-                # Add to embeddings matrix
-                if self.embeddings is None:
-                    self.embeddings = np.array([embedding])
-                    self.doc_ids = [doc_id]
-                else:
-                    self.embeddings = np.vstack([self.embeddings, embedding])
-                    self.doc_ids.append(doc_id)
+            # Add to embeddings matrix
+            if self.embeddings is None:
+                self.embeddings = np.array([embedding])
+                self.doc_ids = [doc_id]
+            else:
+                self.embeddings = np.vstack([self.embeddings, embedding])
+                self.doc_ids.append(doc_id)
 
-                # Save to disk
-                self._save_data()
-
-            except NotImplementedError:
-                logger.warning("Warning: Embedding function not implemented. Using keyword-based storage only.")
-            except Exception as e:
-                logger.error(f"Error generating embeddings: {e}")
+            # Save to disk
+            self._save_data()
 
             return doc_id
 
@@ -314,49 +285,47 @@ class VectorStore:
         # Save updated data
         self._save_data()
 
-    def semantic_search(self, query: str, top_k: int = 5, threshold: float = 0.7) -> List[Dict]:
+    def semantic_search(self, query: str, top_k: int = 5, threshold: Optional[float] = None) -> List[Dict]:
         """Perform semantic search using embeddings"""
+        if threshold is None:
+            threshold = get_run_config().semantic_threshold
         if self.embeddings is None or len(self.doc_ids) == 0:
             return self.keyword_search(query, top_k)
 
-        try:
-            # Get query embedding
-            query_embedding = get_embeddings([query[: self.max_length]], self.embedding_model)[0]
-            query_vector = np.array(query_embedding)
+        # Get query embedding (fail loudly if embeddings fail)
+        query_embedding = get_embeddings(
+            [query[: self.max_length]],
+            model=self.embedding_model,
+            provider=self.embedding_provider,
+        )[0]
+        query_vector = np.array(query_embedding)
 
-            # Calculate cosine similarities
-            similarities = np.dot(self.embeddings, query_vector) / (
-                np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(query_vector)
-            )
+        # Calculate cosine similarities
+        similarities = np.dot(self.embeddings, query_vector) / (
+            np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(query_vector)
+        )
 
-            # Get top-k most similar documents
-            top_indices = np.argsort(similarities)[::-1][:top_k]
+        # Get top-k most similar documents
+        top_indices = np.argsort(similarities)[::-1][:top_k]
 
-            results = []
-            for idx in top_indices:
-                if similarities[idx] >= threshold:
-                    doc_id = self.doc_ids[idx]
-                    doc_info = self.documents[doc_id]
+        results = []
+        for idx in top_indices:
+            if similarities[idx] >= threshold:
+                doc_id = self.doc_ids[idx]
+                doc_info = self.documents[doc_id]
 
-                    results.append(
-                        {
-                            "doc_id": doc_id,
-                            "similarity_score": float(similarities[idx]),
-                            "content": doc_info["content"],
-                            "metadata": doc_info["metadata"],
-                            "preview": doc_info["content_preview"],
-                            "timestamp": doc_info["timestamp"],
-                        }
-                    )
+                results.append(
+                    {
+                        "doc_id": doc_id,
+                        "similarity_score": float(similarities[idx]),
+                        "content": doc_info["content"],
+                        "metadata": doc_info["metadata"],
+                        "preview": doc_info["content_preview"],
+                        "timestamp": doc_info["timestamp"],
+                    }
+                )
 
-            return results
-
-        except NotImplementedError:
-            logger.warning("Warning: Embedding function not implemented. Falling back to keyword search.")
-            return self.keyword_search(query, top_k)
-        except Exception as e:
-            logger.error(f"Error in semantic search: {e}")
-            return self.keyword_search(query, top_k)
+        return results
 
     def keyword_search(self, query: str, top_k: int = 5) -> List[Dict]:
         """Fallback keyword-based search"""
@@ -404,27 +373,22 @@ class VectorStore:
         if doc_id not in self.documents:
             return False
 
-        try:
-            # Remove from documents
-            del self.documents[doc_id]
+        # Remove from documents
+        del self.documents[doc_id]
 
-            # Remove from embeddings if it exists
-            if doc_id in self.doc_ids:
-                idx = self.doc_ids.index(doc_id)
-                self.doc_ids.pop(idx)
+        # Remove from embeddings if it exists
+        if doc_id in self.doc_ids:
+            idx = self.doc_ids.index(doc_id)
+            self.doc_ids.pop(idx)
 
-                if self.embeddings is not None:
-                    self.embeddings = np.delete(self.embeddings, idx, axis=0)
-                    if self.embeddings.shape[0] == 0:
-                        self.embeddings = None
+            if self.embeddings is not None:
+                self.embeddings = np.delete(self.embeddings, idx, axis=0)
+                if self.embeddings.shape[0] == 0:
+                    self.embeddings = None
 
-            # Save updated data
-            self._save_data()
-            return True
-
-        except Exception as e:
-            logger.error(f"Error deleting document: {e}")
-            return False
+        # Save updated data
+        self._save_data()
+        return True
 
     def get_stats(self) -> Dict:
         """Get statistics about the vector store"""
@@ -434,6 +398,7 @@ class VectorStore:
             "embedding_dimension": self.embeddings.shape[1] if self.embeddings is not None else 0,
             "storage_size_mb": self._get_storage_size(),
             "embedding_model": self.embedding_model,
+            "embedding_provider": self.embedding_provider,
         }
 
     def _get_storage_size(self) -> float:
@@ -465,21 +430,19 @@ class VectorStore:
             doc_ids.append(doc_id)
             contents.append(content[: self.max_length])  # Truncate to max length
 
-        # Generate embeddings in batch
-        try:
-            embeddings = get_embeddings(contents, self.embedding_model)
+        # Generate embeddings in batch (fail loudly on error)
+        embeddings = get_embeddings(
+            contents,
+            model=self.embedding_model,
+            provider=self.embedding_provider,
+        )
 
-            if self.embeddings is None:
-                self.embeddings = np.array(embeddings)
-                self.doc_ids = doc_ids.copy()
-            else:
-                self.embeddings = np.vstack([self.embeddings, np.array(embeddings)])
-                self.doc_ids.extend(doc_ids)
-
-        except NotImplementedError:
-            logger.warning("Warning: Embedding function not implemented.")
-        except Exception as e:
-            logger.error(f"Error generating batch embeddings: {e}")
+        if self.embeddings is None:
+            self.embeddings = np.array(embeddings)
+            self.doc_ids = doc_ids.copy()
+        else:
+            self.embeddings = np.vstack([self.embeddings, np.array(embeddings)])
+            self.doc_ids.extend(doc_ids)
 
         # Save to disk
         self._save_data()

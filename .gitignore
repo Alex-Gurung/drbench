@@ -45,6 +45,7 @@ htmlcov/
 
 # Logs
 *.log
+logs/
 
 # Local development settings
 .env
@@ -80,5 +81,6 @@ research_workspace/
 vector_stores/
 temp_score_eval*/
 outputs/
+runs/
 
 experiments/web_agents/agentlab_results
