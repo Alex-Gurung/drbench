@@ -99,7 +99,7 @@ class AIAgentManager:
 
         elif self.provider == "vllm":
             self.api_key = api_key or config.VLLM_API_KEY or "not-needed"
-            self.api_url = api_url or config.VLLM_API_URL
+            self.api_url = api_url or os.getenv("VLLM_API_URL")
             if not self.api_url:
                 raise ValueError(
                     "DRBENCH_LLM_PROVIDER=vllm requires VLLM_API_URL to be set"

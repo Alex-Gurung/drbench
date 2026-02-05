@@ -36,6 +36,36 @@ class ActionType(Enum):
     LOCAL_FILE_ANALYSIS = "local_file_analysis"
 
 
+# Map common LLM/tool aliases to valid ActionType values.
+_ACTION_TYPE_ALIASES = {
+    "internet_search": "web_search",
+    "web": "web_search",
+    "web_search": "web_search",
+    "enhanced_url_fetch": "url_fetch",
+    "url_fetch": "url_fetch",
+    "file_download": "file_download",
+    "local_file_search": "local_document_search",
+    "local_document_search": "local_document_search",
+    "local_file_analysis": "local_file_analysis",
+    "smart_analysis": "data_analysis",
+    "analysis": "data_analysis",
+    "data_analysis": "data_analysis",
+    "context_synthesis": "context_synthesis",
+    "enterprise_api": "enterprise_api",
+    "mcp_query": "mcp_query",
+}
+
+
+def _coerce_action_type(raw_type: Any) -> ActionType:
+    """Normalize LLM/tool action types to valid ActionType values."""
+    if raw_type is None:
+        normalized = "web_search"
+    else:
+        normalized = str(raw_type).strip().lower()
+    normalized = _ACTION_TYPE_ALIASES.get(normalized, normalized)
+    return ActionType(normalized)
+
+
 @dataclass
 class Action:
     """Represents a single executable action"""
@@ -83,7 +113,7 @@ class Action:
         """Create Action from dictionary"""
         return cls(
             id=data["id"],
-            type=ActionType(data["type"]),
+            type=_coerce_action_type(data.get("type")),
             description=data["description"],
             parameters=data["parameters"],
             status=ActionStatus(data["status"]),
@@ -586,7 +616,7 @@ class ActionPlanner:
                 try:
                     action = Action(
                         id=f"{task_id}_action_{i}",
-                        type=ActionType(config.get("type", "web_search")),
+                        type=_coerce_action_type(config.get("type", "web_search")),
                         description=config.get("description", ""),
                         parameters=config.get("parameters", {}),
                         priority=config.get("priority", 0.5),
@@ -702,7 +732,7 @@ class ActionPlanner:
                 try:
                     action = Action(
                         id=f"fallback_action_{i}",
-                        type=ActionType(config.get("type", "web_search")),
+                        type=_coerce_action_type(config.get("type", "web_search")),
                         description=config.get("description", ""),
                         parameters=config.get("parameters", {}),
                         priority=config.get("priority", 0.5),
@@ -894,7 +924,7 @@ Create valid JSON only, no other text.
                 try:
                     action = Action(
                         id=action_id,
-                        type=ActionType(config.get("type", "web_search")),
+                        type=_coerce_action_type(config.get("type", "web_search")),
                         description=config.get("description", ""),
                         parameters=config.get("parameters", {}),
                         priority=config.get("priority", 0.5),

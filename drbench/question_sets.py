@@ -3,14 +3,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-from drbench.task_loader import get_data_path
-
 
 @dataclass(frozen=True)
 class QuestionSet:
     name: str
     source: str
     questions: Dict[str, str]
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+QUESTION_SET_DIRS = [
+    REPO_ROOT / "data" / "question_sets",
+    REPO_ROOT / "data" / "tasks" / "question_sets",
+]
 
 
 def _load_question_set(path: Path) -> QuestionSet:
@@ -33,19 +37,41 @@ def _load_question_set(path: Path) -> QuestionSet:
     return QuestionSet(name=name, source=str(path), questions=questions)
 
 
+def _resolve_question_set_path(
+    question_set: Optional[str],
+    question_file: Optional[str],
+) -> Optional[Path]:
+    if question_file:
+        return Path(question_file)
+
+    if not question_set:
+        return None
+
+    direct_path = Path(question_set)
+    if direct_path.exists():
+        return direct_path
+
+    for base_dir in QUESTION_SET_DIRS:
+        candidate = base_dir / f"{question_set}.json"
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
 def load_question_set(
     question_set: Optional[str] = None,
     question_file: Optional[str] = None,
 ) -> Optional[QuestionSet]:
-    if question_file:
-        path = Path(question_file)
-    elif question_set:
-        path = Path(get_data_path(f"drbench/data/question_sets/{question_set}.json"))
-    else:
+    path = _resolve_question_set_path(question_set, question_file)
+    if not path:
         return None
 
     if not path.exists():
-        raise FileNotFoundError(f"Question set not found: {path}")
+        raise FileNotFoundError(
+            f"Question set not found: {path} "
+            f"(question_set={question_set!r}, question_file={question_file!r})"
+        )
 
     return _load_question_set(path)
 

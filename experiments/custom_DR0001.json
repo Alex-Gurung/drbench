@@ -1,0 +1,8 @@
+{
+  "set_name": "custom_dr0001",
+  "questions": {
+    "DR0001": {
+      "dr_question": "For the company in the local documents that reported an average monthly store energy cost in Q3 2023, what is the estimated monthly electricity consumption (kWh) if the applicable tariff rate is the one used by [external utility program]? Give a single number."
+    }
+  }
+}

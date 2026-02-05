@@ -36,9 +36,16 @@ def get_data_path(data_name) -> str:
         path = data_name
     else:
         data_root = get_data_dir()
-        # If the caller passed "drbench/data/...", strip the leading "drbench"
-        if data_name.parts[:2] == ("drbench", "data"):
-            data_name = Path(*data_name.parts[1:])
+        # Strip redundant prefixes since data_root already includes drbench/data/tasks
+        if data_name.parts[:3] == ("drbench", "data", "tasks"):
+            # Strip full "drbench/data/tasks" prefix
+            data_name = Path(*data_name.parts[3:]) if len(data_name.parts) > 3 else Path("")
+        elif data_name.parts[:2] == ("drbench", "data"):
+            # Strip "drbench/data" prefix
+            data_name = Path(*data_name.parts[2:]) if len(data_name.parts) > 2 else Path("")
+        elif data_name.parts[:1] == ("data",) and len(data_name.parts) > 1 and data_name.parts[1] == "tasks":
+            # Strip "data/tasks" prefix
+            data_name = Path(*data_name.parts[2:]) if len(data_name.parts) > 2 else Path("")
         path = data_root / data_name
 
     if not path.exists():
@@ -396,7 +403,7 @@ class TaskLoader:
 
 
 def get_task_from_id(task_id: str) -> Task:
-    path = get_data_path(f"drbench/data/tasks/{task_id}/config")
+    path = get_data_path(f"{task_id}/config")
     task = Task(path)
     return task
 
@@ -539,14 +546,14 @@ def get_tasks_df(subset: str = None, saveto=None):
 
     else:
         # Load all tasks from the tasks directory
-        tasks_dir = Path(get_data_path("drbench/data/tasks"))
+        tasks_dir = Path(get_data_path(""))
         task_ids_to_process = [
             task_dir.name for task_dir in tasks_dir.iterdir() if task_dir.is_dir()
         ]
 
     # Process each task
     for task_id in task_ids_to_process:
-        task_dir = Path(get_data_path("drbench/data/tasks")) / task_id
+        task_dir = Path(get_data_path("")) / task_id
         dr_question_file = task_dir / "dr_question.json"
         info_file = task_dir / "info.json"
         context_file = task_dir / "context.json"
@@ -630,7 +637,7 @@ def get_facts_df(task_id, saveto=None):
     Returns:
         pd.DataFrame: DataFrame with fact information from qa_dict.json files
     """
-    task_dir = Path(get_data_path(f"drbench/data/tasks/{task_id}"))
+    task_dir = Path(get_data_path("")) / task_id
     files_dir = task_dir / "files"
 
     if not files_dir.exists():

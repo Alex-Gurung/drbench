@@ -4,7 +4,7 @@ Batch runner for DrBench tasks.
 
 Usage examples:
   python experiments/run_tasks.py DR0001 DR0002 --model gpt-4o-mini --run-dir ./runs/demo
-  python experiments/run_tasks.py --subset validation --model Qwen/Qwen3-30B --llm-provider vllm
+  python experiments/run_tasks.py --subset validation --model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 --llm-provider vllm
 """
 
 import argparse
@@ -42,6 +42,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", type=str, help="Output directory for runs")
     parser.add_argument("--data-dir", type=str, help="Override DRBENCH_DATA_DIR")
     parser.add_argument("--question-set", type=str, help="Question set name")
+    parser.add_argument("--question-file", type=str, help="Path to question set JSON file")
 
     parser.add_argument("--no-web", action="store_true", help="Disable external web access")
     parser.add_argument("--no-log", action="store_true", help="Disable all logging")
@@ -54,6 +55,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--enterprise", action="store_true", help="Enable enterprise container")
     parser.add_argument("--enterprise-auto-ports", action="store_true", help="Auto-select enterprise ports")
     parser.add_argument("--enterprise-free-ports", action="store_true", help="Free ports before start")
+
+    # BrowseComp-Plus offline web search
+    parser.add_argument("--browsecomp", action="store_true", help="Use BrowseComp offline corpus instead of live web search")
+    parser.add_argument("--browsecomp-index", type=str, default="/home/toolkit/BrowseComp-Plus/indexes/qwen3-embedding-4b/corpus.shard*_of_*.pkl", help="Path glob for BrowseComp index shards")
+    parser.add_argument("--browsecomp-model", type=str, default="Qwen/Qwen3-Embedding-4B", help="Embedding model for BrowseComp queries")
+    parser.add_argument("--browsecomp-dataset", type=str, default="Tevatron/browsecomp-plus-corpus", help="HuggingFace dataset for BrowseComp corpus")
+    parser.add_argument("--browsecomp-top-k", type=int, default=5, help="Number of documents to retrieve per query")
 
     return parser.parse_args()
 
@@ -92,7 +100,16 @@ def _default_run_dir(model: str) -> Path:
     return repo_root / "runs" / f"batch_{model_short}_{timestamp}"
 
 
-def run_single_task(task_id: str, base_dir: Path, cfg: RunConfig, question_set: str | None, enterprise: bool, auto_ports: bool, free_ports: bool) -> dict:
+def run_single_task(
+    task_id: str,
+    base_dir: Path,
+    cfg: RunConfig,
+    question_set: str | None,
+    question_file: str | None,
+    enterprise: bool,
+    auto_ports: bool,
+    free_ports: bool,
+) -> dict:
     run_dir = base_dir / task_id
     run_dir.mkdir(parents=True, exist_ok=True)
     results_dir = run_dir / "results"
@@ -116,7 +133,12 @@ def run_single_task(task_id: str, base_dir: Path, cfg: RunConfig, question_set: 
         task_local_files = task.get_local_files_list()
 
         dr_question = task.get_task_config()["dr_question"]
-        dr_question, used_set = resolve_dr_question(task_id, dr_question, question_set=question_set)
+        dr_question, used_set = resolve_dr_question(
+            task_id,
+            dr_question,
+            question_set=question_set,
+            question_file=question_file,
+        )
 
         if cfg.verbose:
             print(task.summary())
@@ -130,6 +152,8 @@ def run_single_task(task_id: str, base_dir: Path, cfg: RunConfig, question_set: 
             "question_set": used_set or "default",
             "dr_question": dr_question,
         }
+        if question_file:
+            question_info["question_file"] = question_file
         (run_dir / "question_used.json").write_text(json.dumps(question_info, indent=2), encoding="utf-8")
 
         if enterprise:
@@ -250,6 +274,9 @@ def main() -> int:
 
     tasks = _resolve_tasks(args)
 
+    if args.question_set and args.question_file:
+        raise ValueError("Use only one of --question-set or --question-file.")
+
     if args.run_dir:
         base_dir = Path(args.run_dir)
     else:
@@ -278,6 +305,7 @@ def main() -> int:
             base_dir=base_dir,
             cfg=cfg,
             question_set=args.question_set,
+            question_file=args.question_file,
             enterprise=args.enterprise,
             auto_ports=args.enterprise_auto_ports,
             free_ports=args.enterprise_free_ports,

@@ -103,23 +103,39 @@ class DrBenchAgent(BaseAgent):
 
     def _register_base_tools(self):
         """Register base tools that don't depend on environment"""
+        cfg = get_run_config()
 
-        # Register base tools
-        tools = [
-            InternetSearchTool(
+        tools = []
+
+        # Web search tool: BrowseComp (offline) or InternetSearch (live)
+        if cfg.browsecomp_enabled:
+            # Use offline BrowseComp corpus search instead of live web
+            from .agent_tools.browsecomp_search_tool import BrowseCompSearchTool
+            logger.info("Using BrowseComp-Plus offline search (replaces InternetSearchTool)")
+            tools.append(BrowseCompSearchTool(
+                config=cfg,
+                vector_store=self.vector_store,
+                device="cpu",  # CPU to avoid vLLM GPU memory conflicts
+            ))
+        elif not cfg.no_web and config.SERPER_API_KEY:
+            # Use live Serper web search
+            tools.append(InternetSearchTool(
                 config.SERPER_API_KEY,
                 vector_store=self.vector_store,
                 content_processor=self.content_processor,
-            ),
-            EnhancedURLFetchTool(self.content_processor, self.model),
-            # Supporting analysis
-            SmartAnalysisTool(
-                self.model,
-                self.vector_store,
-                capacity_tier=CapacityTier.ULTRA_CAPACITY,
-                workspace_dir=self.workspace_dir,
-            ),
-        ]
+            ))
+
+        # URL fetching (only useful with live web)
+        if not cfg.browsecomp_enabled and not cfg.no_web:
+            tools.append(EnhancedURLFetchTool(self.content_processor, self.model))
+
+        # Supporting analysis
+        tools.append(SmartAnalysisTool(
+            self.model,
+            self.vector_store,
+            capacity_tier=CapacityTier.ULTRA_CAPACITY,
+            workspace_dir=self.workspace_dir,
+        ))
 
         for tool in tools:
             self.tool_registry.register_tool(tool)
@@ -569,7 +585,16 @@ class DrBenchAgent(BaseAgent):
             return error_result
 
     def _get_tool_by_name(self, tool_name: str):
-        """Get a tool instance by its class name"""
+        """Get a tool instance by its class name.
+
+        When BrowseComp is enabled, maps InternetSearchTool -> BrowseCompSearchTool
+        so action planner's web search actions work transparently.
+        """
+        # Map InternetSearchTool to BrowseCompSearchTool when browsecomp is enabled
+        cfg = get_run_config()
+        if cfg.browsecomp_enabled and tool_name == "InternetSearchTool":
+            tool_name = "BrowseCompSearchTool"
+
         for tool in self.tool_registry.tools:
             if tool.__class__.__name__ == tool_name:
                 return tool
@@ -611,8 +636,14 @@ class DrBenchAgent(BaseAgent):
 
         # If action has preferred tool, try to match it
         if hasattr(action, "preferred_tool") and action.preferred_tool:
+            preferred = action.preferred_tool
+            # Map InternetSearchTool to BrowseCompSearchTool when browsecomp is enabled
+            cfg = get_run_config()
+            if cfg.browsecomp_enabled and preferred == "InternetSearchTool":
+                preferred = "BrowseCompSearchTool"
+
             for tool in candidate_tools:
-                if tool.__class__.__name__ == action.preferred_tool:
+                if tool.__class__.__name__ == preferred:
                     return tool
 
         # Default to first available tool - the action planner should have made the right choice

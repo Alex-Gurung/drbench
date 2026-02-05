@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -99,9 +100,10 @@ def prompt_llm(prompt, model=None, **kwargs):
         return response.choices[0].message.content
 
     if provider == "vllm":
-        if not config.VLLM_API_URL:
+        vllm_api_url = os.getenv("VLLM_API_URL")
+        if not vllm_api_url:
             raise ValueError("VLLM_API_URL is required for provider=vllm")
-        client = OpenAI(base_url=f"{config.VLLM_API_URL}/v1", api_key=config.VLLM_API_KEY or "not-needed")
+        client = OpenAI(base_url=f"{vllm_api_url}/v1", api_key=config.VLLM_API_KEY or "not-needed")
         response = client.chat.completions.create(
             model=model,
             messages=messages,

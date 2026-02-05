@@ -29,7 +29,7 @@ Common args:
 Examples:
 ```bash
 python experiments/run_tasks.py DR0001 DR0002 --model gpt-4o-mini --run-dir ./runs/demo
-python experiments/run_tasks.py --subset validation --model Qwen/Qwen3-30B --llm-provider vllm
+python experiments/run_tasks.py --subset validation --model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 --llm-provider vllm
 ```
 
 ### `experiments/privacy_question_harness.py`

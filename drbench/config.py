@@ -46,6 +46,8 @@ OPENROUTER_API_URL = os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/
 AZURE_ENDPOINT = os.getenv("AZURE_ENDPOINT")
 AZURE_API_VERSION = os.getenv("AZURE_API_VERSION")
 DRBENCH_DATA_DIR = os.getenv("DRBENCH_DATA_DIR")
+DRBENCH_DOCKER_IMAGE = os.getenv("DRBENCH_DOCKER_IMAGE", "drbench-services")
+DRBENCH_DOCKER_TAG = os.getenv("DRBENCH_DOCKER_TAG", "latest")
 
 # =============================================================================
 # Providers (env defaults, CLI overrides)
@@ -113,6 +115,14 @@ class RunConfig:
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
 
+    # BrowseComp-Plus retrieval (CLI: --browsecomp, --browsecomp-index, etc.)
+    # When enabled, replaces live internet search with fixed corpus retrieval
+    browsecomp_enabled: bool = False
+    browsecomp_index_glob: str = "/home/toolkit/BrowseComp-Plus/indexes/qwen3-embedding-4b/corpus.shard*_of_*.pkl"
+    browsecomp_model_name: str = "Qwen/Qwen3-Embedding-4B"
+    browsecomp_dataset_name: str = "Tevatron/browsecomp-plus-corpus"
+    browsecomp_top_k: int = 5
+
     def get_llm_provider(self) -> str:
         """Get LLM provider, falling back to env var."""
         return self.llm_provider or DRBENCH_LLM_PROVIDER
@@ -132,7 +142,8 @@ class RunConfig:
         Expected args attributes:
             model, max_iterations, concurrent_actions, semantic_threshold,
             run_dir, no_log, no_log_searches, no_log_prompts, no_log_generations,
-            verbose, llm_provider, embedding_provider, embedding_model
+            verbose, llm_provider, embedding_provider, embedding_model,
+            browsecomp, browsecomp_index, browsecomp_model, browsecomp_dataset, browsecomp_top_k
         """
         return cls(
             model=getattr(args, "model", None),
@@ -148,6 +159,11 @@ class RunConfig:
             llm_provider=getattr(args, "llm_provider", None),
             embedding_provider=getattr(args, "embedding_provider", None),
             embedding_model=getattr(args, "embedding_model", None),
+            browsecomp_enabled=getattr(args, "browsecomp", False),
+            browsecomp_index_glob=getattr(args, "browsecomp_index", "/home/toolkit/BrowseComp-Plus/indexes/qwen3-embedding-4b/corpus.shard*_of_*.pkl"),
+            browsecomp_model_name=getattr(args, "browsecomp_model", "Qwen/Qwen3-Embedding-4B"),
+            browsecomp_dataset_name=getattr(args, "browsecomp_dataset", "Tevatron/browsecomp-plus-corpus"),
+            browsecomp_top_k=getattr(args, "browsecomp_top_k", 5),
         )
 
     def to_dict(self) -> dict:
@@ -165,6 +181,10 @@ class RunConfig:
             "llm_provider": self.get_llm_provider(),
             "embedding_provider": self.get_embedding_provider(),
             "embedding_model": self.get_embedding_model(),
+            "browsecomp_enabled": self.browsecomp_enabled,
+            "browsecomp_index_glob": self.browsecomp_index_glob,
+            "browsecomp_model_name": self.browsecomp_model_name,
+            "browsecomp_top_k": self.browsecomp_top_k,
         }
 
 
@@ -231,7 +251,8 @@ def validate_provider_config(provider: str) -> None:
         ValueError: If required config is missing
     """
     if provider == "vllm":
-        if not VLLM_API_URL:
+        # Read from env directly (not module-level cache) to support runtime export
+        if not os.getenv("VLLM_API_URL"):
             raise ValueError(
                 f"DRBENCH_LLM_PROVIDER={provider} requires VLLM_API_URL to be set"
             )
