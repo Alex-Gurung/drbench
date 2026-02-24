@@ -96,7 +96,10 @@ class DrBenchAgent(BaseAgent):
         )
 
         # Initialize enhanced report assembler
-        self.report_assembler = ReportAssembler(model=self.model, vector_store=self.vector_store)
+        self.report_assembler = ReportAssembler(
+            model=self.model, vector_store=self.vector_store,
+            report_style=cfg.report_style,
+        )
 
         # Register base tools
         self._register_base_tools()

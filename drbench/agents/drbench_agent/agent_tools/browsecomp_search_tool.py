@@ -226,16 +226,20 @@ class BrowseCompSearchTool(Tool):
             scores = scores[0]
             indices = indices[0]
 
-            # Retrieve documents
+            # Retrieve documents (truncate to avoid blowing up adaptive planning context)
+            max_chars = self.config.browsecomp_max_chars
             results = []
             for score, idx in zip(scores, indices):
                 docid = self.lookup[int(idx)]
                 doc = self._get_doc(docid)
+                text = doc.get("text") or ""
+                if len(text) > max_chars:
+                    text = text[:max_chars] + "\n\n[truncated]"
                 results.append({
                     "docid": docid,
                     "score": float(score),
                     "url": doc.get("url"),
-                    "text": doc.get("text"),
+                    "text": text,
                 })
 
             # Store in vector store if available

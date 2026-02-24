@@ -603,8 +603,11 @@ class LocalFileSearchTool(Tool):
             folder_filter = params.get("folder_filter")
             top_k = params.get("top_k", 10)
 
-            # Search vector store
-            search_results = self.vector_store.search(query=search_query, top_k=top_k * 2)  # Get more results to filter
+            # Search vector store with no threshold — local docs have lower similarity
+            # than web results, and we filter by source_type anyway
+            search_results = self.vector_store.semantic_search(
+                query=search_query, top_k=top_k * 2, threshold=0.0
+            )
 
             # Filter results to local documents only
             local_results = []

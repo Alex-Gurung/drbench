@@ -128,6 +128,8 @@ class WebDenseSearcher:
         query_max_len: int = 512,
         encoder_batch_size: int = 8,
         doc_store: Optional[Any] = None,
+        device: Optional[str] = None,
+        embedder: Optional['Qwen3EosEmbedder'] = None,
     ) -> None:
         self.index_glob = index_glob
         self.model_name_or_path = model_name_or_path
@@ -164,12 +166,16 @@ class WebDenseSearcher:
         self.index = faiss.IndexFlatIP(self.dim)
         self.index.add(self._reps)
 
-        self.embedder = Qwen3EosEmbedder(
-            model_name_or_path=self.model_name_or_path,
-            query_prefix=self.query_prefix,
-            query_max_len=self.query_max_len,
-            normalize=self.normalize,
-        )
+        if embedder is not None:
+            self.embedder = embedder
+        else:
+            self.embedder = Qwen3EosEmbedder(
+                model_name_or_path=self.model_name_or_path,
+                query_prefix=self.query_prefix,
+                query_max_len=self.query_max_len,
+                normalize=self.normalize,
+                device=device,
+            )
 
     def search_many(self, queries: list[str], *, k: int = 10) -> list[list[WebDenseHit]]:
         if not queries:

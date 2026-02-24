@@ -19,6 +19,7 @@ import os
 from typing import List, Optional
 
 import numpy as np
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,6 @@ def _get_huggingface_embeddings(texts: List[str], model: str) -> List[List[float
 
 def _get_vllm_embeddings(texts: List[str], model: str) -> List[List[float]]:
     """Generate embeddings using vLLM server."""
-    from openai import OpenAI
 
     base_url = os.getenv("VLLM_EMBEDDING_URL")
     if not base_url:

@@ -32,6 +32,7 @@ from making_dataset.utils.vllm_client import VLLMClient
 
 # Default paths
 DEFAULT_CHUNKS_LOCAL = ROOT_DIR / "outputs" / "chunks_local.jsonl"
+DEFAULT_DOCS_LOCAL = ROOT_DIR / "outputs" / "docs_local.jsonl"
 DEFAULT_SECRET_INVENTORY = ROOT_DIR / "outputs" / "secret_inventory.jsonl"
 DEFAULT_WEB_BM25_INDEX = "/home/toolkit/BrowseComp-Plus/indexes/bm25"
 
@@ -56,13 +57,10 @@ class WebHit:
 
 @dataclass
 class Bridge:
-    bridge_type: str
-    local_value: str
-    web_value: str
-    relationship: str
-    question: str
-    answer: str
-    reasoning: str
+    link: str           # The connecting entity/concept
+    question: str       # Multi-hop question
+    answer: str         # Answer (from web)
+    reasoning: str      # Why it requires both sources
 
 
 # LLM ranking prompt - select best bridge candidates from retrieved docs
@@ -82,36 +80,35 @@ RANKING: [best_idx, second_idx, ...] (1-indexed)
 BEST_REASON: <why the top doc is most promising, 15 words max>
 """
 
-# Full bridge discovery prompt
-BRIDGE_DISCOVERY_PROMPT = """You are analyzing a local enterprise secret and a web document to find meaningful relationships.
+# Full bridge discovery prompt - focuses on finding links for multi-hop questions
+BRIDGE_DISCOVERY_PROMPT = """You are building multi-hop questions that require BOTH a private enterprise fact AND public web information to answer.
 
-LOCAL SECRET (private company data):
+PRIVATE FACT (from enterprise documents):
 Question: {secret_question}
 Answer: {secret_answer}
-Context: {secret_quote}
 
 WEB DOCUMENT (public information):
 {web_text}
 
-Find a meaningful relationship between the local secret and something specific in the web document.
+Your task: Find a link between the private fact and the web document that enables a multi-hop question.
 
-Valid relationship types:
-- RATIO: Local value compared to web value (e.g., "Company X uses 10x more")
-- COMPARISON: Local vs web benchmark (e.g., "Above industry average of Y%")
-- THRESHOLD: Local qualifies for something (e.g., "Exceeds minimum requirement of Z")
-- RANK: Local's position in a list (e.g., "Ranks #N among...")
-- CATEGORY: Local fits a category (e.g., "Qualifies as mid-size company")
+A valid bridge requires:
+1. The PRIVATE FACT provides a key piece (entity name, metric value, vendor name, etc.)
+2. The WEB DOCUMENT provides additional information about that entity/value
+3. A question can be constructed that requires BOTH to answer
 
-If you find a meaningful relationship, output:
-BRIDGE_TYPE: <type>
-LOCAL_VALUE: <the specific value from the local secret>
-WEB_VALUE: <the related value from web document>
-RELATIONSHIP: <how they connect>
-QUESTION: <a question that requires BOTH the local secret AND web fact to answer>
-ANSWER: <the answer to your question>
-REASONING: <brief explanation>
+Examples:
+- Private: "Company uses SAP" + Web: "SAP founded in Germany" → Q: "Where was the company's vendor founded?" A: Germany
+- Private: "Energy: 450K kWh" + Web: "Walmart: 7.2B kWh" → Q: "What retailer uses ~16,000x the company's energy?" A: Walmart
+- Private: "Uses Google Tag Manager" + Web: "GTM released 2012" → Q: "When was the company's analytics tool released?" A: 2012
 
-If NO meaningful relationship exists, output:
+If you find a valid link, output:
+LINK: <what connects them - entity name, metric type, concept>
+QUESTION: <question requiring both private fact and web doc to answer>
+ANSWER: <answer from web doc>
+REASONING: <why this requires both sources>
+
+If NO valid link exists, output:
 NO_BRIDGE: <brief reason>
 """
 
@@ -256,13 +253,12 @@ def discover_bridge(secret: Secret, hit: WebHit, client: VLLMClient) -> Bridge |
     prompt = BRIDGE_DISCOVERY_PROMPT.format(
         secret_question=secret.question,
         secret_answer=secret.answer,
-        secret_quote=secret.quote[:500] if secret.quote else "",
         web_text=hit.text[:3000],
     )
     response = client.chat(
         messages=[{"role": "user", "content": prompt}],
         stage="bridge_discovery",
-        max_tokens=500,
+        max_tokens=400,
         temperature=0.3,
     )
     output = response.choices[0].message.content
@@ -274,15 +270,12 @@ def discover_bridge(secret: Secret, hit: WebHit, client: VLLMClient) -> Bridge |
         m = re.search(rf"{field}:\s*(.+?)(?:\n[A-Z_]+:|$)", output, re.DOTALL)
         return m.group(1).strip() if m else ""
 
-    bridge_type = extract("BRIDGE_TYPE")
-    if not bridge_type:
+    link = extract("LINK")
+    if not link:
         return None
 
     return Bridge(
-        bridge_type=bridge_type,
-        local_value=extract("LOCAL_VALUE"),
-        web_value=extract("WEB_VALUE"),
-        relationship=extract("RELATIONSHIP"),
+        link=link,
         question=extract("QUESTION"),
         answer=extract("ANSWER"),
         reasoning=extract("REASONING"),
@@ -387,14 +380,13 @@ def explore_secret(
         print(f"  Checking [{idx+1}] {hit.docid}...")
         bridge = discover_bridge(secret, hit, client)
         if bridge:
-            print(f"    FOUND: {bridge.bridge_type} - {bridge.relationship}")
+            print(f"    FOUND: {bridge.link}")
+            print(f"    Q: {bridge.question}")
+            print(f"    A: {bridge.answer}")
             result["bridges"].append({
                 "hit_idx": idx,
                 "docid": hit.docid,
-                "type": bridge.bridge_type,
-                "local_value": bridge.local_value,
-                "web_value": bridge.web_value,
-                "relationship": bridge.relationship,
+                "link": bridge.link,
                 "question": bridge.question,
                 "answer": bridge.answer,
                 "reasoning": bridge.reasoning,
@@ -456,10 +448,9 @@ pre {{ background: #f0f0f0; padding: 10px; overflow-x: auto; font-size: 0.85em; 
             html += "<h3>Bridges Found</h3>"
             for b in r["bridges"]:
                 html += f"""<div class="bridge">
-<h4>{b['type']}: {b['relationship']}</h4>
-<p><strong>Local:</strong> {b['local_value']} | <strong>Web:</strong> {b['web_value']}</p>
-<p><strong>Question:</strong> {b['question']}</p>
-<p><strong>Answer:</strong> {b['answer']}</p>
+<h4>🔗 {b['link']}</h4>
+<p><strong>Q:</strong> {b['question']}</p>
+<p><strong>A:</strong> {b['answer']}</p>
 <p><em>{b['reasoning']}</em></p>
 </div>"""
 

@@ -62,6 +62,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--browsecomp-model", type=str, default="Qwen/Qwen3-Embedding-4B", help="Embedding model for BrowseComp queries")
     parser.add_argument("--browsecomp-dataset", type=str, default="Tevatron/browsecomp-plus-corpus", help="HuggingFace dataset for BrowseComp corpus")
     parser.add_argument("--browsecomp-top-k", type=int, default=5, help="Number of documents to retrieve per query")
+    parser.add_argument("--browsecomp-max-chars", type=int, default=8000, help="Max chars per BrowseComp result (~4 chars/token)")
 
     return parser.parse_args()
 

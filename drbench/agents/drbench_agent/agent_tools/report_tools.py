@@ -24,9 +24,11 @@ class ReportAssembler:
         capacity_tier: Optional[str] = None,
         max_content_length: int = None,
         max_total_tokens: int = None,
+        report_style: str = "research_report",
     ):
         self.model = model
         self.vector_store = vector_store
+        self.report_style = report_style
 
         # Get configuration (model-agnostic with optional optimizations)
         config = get_report_config(
@@ -51,6 +53,9 @@ class ReportAssembler:
         try:
             # Reset evidence metadata for this report
             self._reset_evidence_metadata()
+
+            if self.report_style == "concise_qa":
+                return self._generate_concise_qa_report(context, action_plan)
 
             # Stage 1: Intelligent Content Analysis
             thematic_content = self._analyze_and_cluster_content(context)
@@ -82,6 +87,117 @@ class ReportAssembler:
         }
         # Reset unified citation registry
         self.citation_registry = UnifiedCitationRegistry()
+
+    def _generate_concise_qa_report(self, context: ResearchContext, action_plan=None) -> str:
+        """Generate a concise Q&A report: answer each sub-question directly with evidence."""
+        clean_question = self._extract_clean_question(context.original_question)
+
+        # Parse sub-questions from the original question
+        # Handles: "1. text", "2) text", "4 (final). text"
+        sub_questions = []
+        for line in clean_question.split("\n"):
+            line = line.strip()
+            m = re.match(r'^(\d+)\s*(?:\([^)]*\))?\s*[\.\)]\s*(.+)', line)
+            if m:
+                sub_questions.append({"num": m.group(1), "text": m.group(2).strip()})
+
+        # If no numbered sub-questions found, treat the whole question as one
+        if not sub_questions:
+            sub_questions = [{"num": "1", "text": clean_question}]
+
+        # Gather all relevant content from vector store
+        all_content = []
+        if self.vector_store:
+            for sq in sub_questions:
+                results = self.vector_store.search(sq["text"], top_k=10, use_semantic=True)
+                for r in results:
+                    if r.get("similarity_score", 0) > 0.3:
+                        all_content.append({
+                            "doc_id": r.get("doc_id", ""),
+                            "text": r.get("content", "")[:2000],
+                            "source_type": r.get("metadata", {}).get("source_type", "unknown"),
+                            "score": r.get("similarity_score", 0),
+                        })
+
+        # Deduplicate by doc_id
+        seen = set()
+        unique_content = []
+        for c in sorted(all_content, key=lambda x: -x["score"]):
+            if c["doc_id"] not in seen:
+                seen.add(c["doc_id"])
+                unique_content.append(c)
+
+        # Register documents in citation registry so finalize_citations works
+        for c in unique_content[:30]:
+            if c["doc_id"]:
+                self.citation_registry.register_document(
+                    doc_id=c["doc_id"],
+                    source_info={"source_type": c["source_type"], "score": c["score"]},
+                )
+
+        # Truncate total content to fit context
+        content_text = json.dumps(unique_content[:30], indent=2)
+        if len(content_text) > self.max_content_length:
+            content_text = content_text[:self.max_content_length]
+
+        # Build the Q&A prompt
+        q_list = "\n".join(f"Q{sq['num']}: {sq['text']}" for sq in sub_questions)
+
+        qa_prompt = f"""You are a research analyst. Answer each question directly and concisely using ONLY the provided evidence.
+
+Original Research Question:
+{clean_question}
+
+Sub-questions to answer:
+{q_list}
+
+Available Evidence (ordered by relevance):
+{content_text}
+
+Instructions:
+- Answer each question in 1-3 sentences with specific facts, numbers, and citations
+- Use [DOC:doc_id] format for citations
+- If a question references a previous answer (e.g., "what is (1)?"), resolve the reference
+- After all Q&A answers, write a brief Synthesis (2-3 sentences) tying everything together
+- Be direct and factual — no filler, no hedging
+- Prioritize internal/enterprise sources over external ones
+
+Format your response exactly as:
+
+## Q1: {{question text}}
+{{Direct answer with citations}}
+
+## Q2: {{question text}}
+{{Direct answer with citations}}
+
+...
+
+## Synthesis
+{{Brief synthesis connecting all findings}}
+"""
+
+        try:
+            report_text = prompt_llm(model=self.model, prompt=qa_prompt)
+        except Exception as e:
+            logger.error(f"Concise QA report generation failed: {e}")
+            return f"# Research Findings\n\nError generating report: {e}"
+
+        # Add header
+        header = f"# Research Findings: {clean_question}\n\n"
+
+        # Resolve citations
+        main_report = header + report_text
+        final_report, citation_assignments = self.citation_registry.finalize_citations(main_report)
+
+        if citation_assignments:
+            references_section = self.citation_registry.generate_references_section()
+            final_report += "\n" + references_section
+
+        # Finalize metadata
+        if action_plan:
+            self._finalize_metadata(context, action_plan, {})
+
+        return final_report
 
     def _analyze_and_cluster_content(self, context: ResearchContext) -> Dict[str, List[Dict]]:
         """Analyze vector store content and cluster by themes"""

@@ -115,6 +115,9 @@ class RunConfig:
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
 
+    # Report style (CLI: --report-style)
+    report_style: str = "research_report"  # "research_report" or "concise_qa"
+
     # BrowseComp-Plus retrieval (CLI: --browsecomp, --browsecomp-index, etc.)
     # When enabled, replaces live internet search with fixed corpus retrieval
     browsecomp_enabled: bool = False
@@ -122,6 +125,7 @@ class RunConfig:
     browsecomp_model_name: str = "Qwen/Qwen3-Embedding-4B"
     browsecomp_dataset_name: str = "Tevatron/browsecomp-plus-corpus"
     browsecomp_top_k: int = 5
+    browsecomp_max_chars: int = 8000  # Max chars per result (~2k tokens)
 
     def get_llm_provider(self) -> str:
         """Get LLM provider, falling back to env var."""
@@ -164,6 +168,8 @@ class RunConfig:
             browsecomp_model_name=getattr(args, "browsecomp_model", "Qwen/Qwen3-Embedding-4B"),
             browsecomp_dataset_name=getattr(args, "browsecomp_dataset", "Tevatron/browsecomp-plus-corpus"),
             browsecomp_top_k=getattr(args, "browsecomp_top_k", 5),
+            browsecomp_max_chars=getattr(args, "browsecomp_max_chars", 8000),
+            report_style=getattr(args, "report_style", "research_report"),
         )
 
     def to_dict(self) -> dict:
@@ -185,6 +191,8 @@ class RunConfig:
             "browsecomp_index_glob": self.browsecomp_index_glob,
             "browsecomp_model_name": self.browsecomp_model_name,
             "browsecomp_top_k": self.browsecomp_top_k,
+            "browsecomp_max_chars": self.browsecomp_max_chars,
+            "report_style": self.report_style,
         }
 
 
