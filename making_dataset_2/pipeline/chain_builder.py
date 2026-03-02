@@ -32,6 +32,7 @@ from making_dataset_2.format_questions import format_numbered_questions
 from making_dataset_2.llm import LLMClient
 from making_dataset_2.pipeline.entity_index import EntityIndex
 from making_dataset_2.pipeline.find_bridge import find_bridge
+from making_dataset_2.retrieval.hybrid import HybridSearcher
 from making_dataset_2.pipeline.step1_seed import select_seed, select_web_seed
 from making_dataset_2.pipeline.step4_questions import (
     generate_question_constrained,
@@ -74,6 +75,9 @@ def build_one_chain(
     local_doc_ids: set[str],
     web_doc_ids: set[str],
     record_trace: bool = True,
+    local_searcher: HybridSearcher | None = None,
+    web_searcher: HybridSearcher | None = None,
+    retrieval_k: int = 50,
 ) -> Chain:
     """Build a single chain from an initialized seed state.
 
@@ -101,9 +105,11 @@ def build_one_chain(
             jump_idx + 1, len(pattern) - 1, src_type, dst_type, current_answer,
         )
 
+        dst_searcher = local_searcher if dst_type == "L" else web_searcher
         candidates = find_bridge(
             entity_index, current_doc_id, current_answer,
             next_pool, state.used_doc_ids, used_answers,
+            searcher=dst_searcher, retrieval_k=retrieval_k,
         )
 
         if record_trace:
@@ -480,6 +486,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--task", default=None, help="Filter by task ID (e.g. DR0001)")
     p.add_argument("--company", default=None, help="Filter by company name")
     p.add_argument("--spacy-model", default="en_core_web_trf")
+    p.add_argument("--retrieval-mode", choices=["none", "bm25"], default="none",
+                   help="Retrieval to expand bridge candidates (default: none = entity-only)")
+    p.add_argument("--retrieval-k", type=int, default=50,
+                   help="Number of chunks to retrieve for bridge expansion")
     p.add_argument("--no-trace", action="store_true")
     p.add_argument("--seed", type=int, default=None, help="Random seed")
     p.add_argument("--verbose", action="store_true")
@@ -569,6 +579,19 @@ def main() -> int:
         entity_index.save(cache_path)
         logger.info("Saved entity index to %s", cache_path)
 
+    # Build retrieval searchers (optional, for bridge expansion)
+    local_searcher = None
+    web_searcher = None
+    if args.retrieval_mode != "none":
+        logger.info("Building retrieval searchers (mode=%s, k=%d)...", args.retrieval_mode, args.retrieval_k)
+        chunks_local_path = Path(args.chunks_local)
+        if chunks_local_path.exists():
+            local_searcher = HybridSearcher(chunks_path=chunks_local_path)
+            logger.info("Local searcher: %d chunks", local_searcher.size)
+        if chunks_web_path.exists():
+            web_searcher = HybridSearcher(chunks_path=chunks_web_path)
+            logger.info("Web searcher: %d chunks", web_searcher.size)
+
     # Build LLM client
     llm = LLMClient(model=args.model, base_url=args.base_url, api_key=args.api_key)
     record_trace = not args.no_trace
@@ -626,6 +649,9 @@ def main() -> int:
                 local_doc_ids=local_doc_ids,
                 web_doc_ids=web_doc_ids,
                 record_trace=record_trace,
+                local_searcher=local_searcher,
+                web_searcher=web_searcher,
+                retrieval_k=args.retrieval_k,
             )
 
             d = _chain_to_dict(chain)

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from drbench.agents.utils import prompt_llm
+from drbench.config import get_run_config
 from drbench.drbench_enterprise_space import DrBenchEnterpriseSearchSpace
 
 
@@ -352,7 +353,37 @@ Available Enterprise Services:
 {chr(10).join(f"- {service}" for service in enterprise_services)}
 """
 
-        planning_prompt = f"""
+        cfg = get_run_config()
+        if cfg.report_style == "concise_qa":
+            planning_prompt = f"""You are answering a set of numbered research questions. Some answers may be in the provided local documents, others may require web search.
+
+Questions:
+"{question}"
+
+{tools_section}
+
+Parse the numbered questions and plan how to find each answer.
+
+Return JSON:
+{{
+  "research_investigation_areas": [
+    {{
+      "area_id": 1,
+      "research_focus": "the question text",
+      "information_needs": ["what specific fact or answer is needed"],
+      "knowledge_sources": ["internal", "external", or "both"],
+      "key_concepts": ["key search terms"]
+    }}
+  ]
+}}
+
+Create one investigation area per numbered question. For each:
+- If the question asks about a specific company's internal data → knowledge_sources: "internal"
+- If the question asks about general/public knowledge → knowledge_sources: "external"
+- If unclear → knowledge_sources: "both"
+"""
+        else:
+            planning_prompt = f"""
 Design a comprehensive enterprise research strategy for: "{question}"
 
 {tools_section}

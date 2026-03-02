@@ -29,6 +29,8 @@ class ReportAssembler:
         self.model = model
         self.vector_store = vector_store
         self.report_style = report_style
+        self._parsed_answers = {}
+        self._parsed_justifications = {}
 
         # Get configuration (model-agnostic with optional optimizations)
         config = get_report_config(
@@ -89,7 +91,7 @@ class ReportAssembler:
         self.citation_registry = UnifiedCitationRegistry()
 
     def _generate_concise_qa_report(self, context: ResearchContext, action_plan=None) -> str:
-        """Generate a concise Q&A report: answer each sub-question directly with evidence."""
+        """Generate a concise Q&A report with ANSWER_N/JUSTIFICATION_N format for easy parsing."""
         clean_question = self._extract_clean_question(context.original_question)
 
         # Parse sub-questions from the original question
@@ -143,7 +145,7 @@ class ReportAssembler:
         # Build the Q&A prompt
         q_list = "\n".join(f"Q{sq['num']}: {sq['text']}" for sq in sub_questions)
 
-        qa_prompt = f"""You are a research analyst. Answer each question directly and concisely using ONLY the provided evidence.
+        qa_prompt = f"""Answer each numbered question with a SHORT, EXACT answer (1-5 words) and a brief justification.
 
 Original Research Question:
 {clean_question}
@@ -151,44 +153,59 @@ Original Research Question:
 Sub-questions to answer:
 {q_list}
 
-Available Evidence (ordered by relevance):
+Available Evidence:
 {content_text}
 
-Instructions:
-- Answer each question in 1-3 sentences with specific facts, numbers, and citations
-- Use [DOC:doc_id] format for citations
-- If a question references a previous answer (e.g., "what is (1)?"), resolve the reference
-- After all Q&A answers, write a brief Synthesis (2-3 sentences) tying everything together
-- Be direct and factual — no filler, no hedging
-- Prioritize internal/enterprise sources over external ones
+For each question, output EXACTLY this format:
+ANSWER_1: <short answer>
+JUSTIFICATION_1: <1-2 sentences citing evidence> [DOC:doc_id]
 
-Format your response exactly as:
-
-## Q1: {{question text}}
-{{Direct answer with citations}}
-
-## Q2: {{question text}}
-{{Direct answer with citations}}
+ANSWER_2: <short answer>
+JUSTIFICATION_2: <1-2 sentences citing evidence> [DOC:doc_id]
 
 ...
 
-## Synthesis
-{{Brief synthesis connecting all findings}}
+ANSWER_FINAL: <final answer>
+JUSTIFICATION_FINAL: <1-2 sentences explaining how sub-answers combine>
+
+Rules:
+- Answers should be as concise as possible (a number, a name, a percentage)
+- Justifications should cite specific evidence using [DOC:doc_id]
+- If a question references a previous answer (e.g., "over the next (1) months"), resolve it
+- If you cannot determine the answer, write: NOT_FOUND
+- Use ONLY the provided evidence
 """
 
         try:
             report_text = prompt_llm(model=self.model, prompt=qa_prompt)
         except Exception as e:
             logger.error(f"Concise QA report generation failed: {e}")
+            self._parsed_answers = {}
+            self._parsed_justifications = {}
             return f"# Research Findings\n\nError generating report: {e}"
 
-        # Add header
+        # Parse ANSWER_N and JUSTIFICATION_N lines
+        answers = {}
+        justifications = {}
+        for line in report_text.split("\n"):
+            line = line.strip()
+            m = re.match(r'^ANSWER_(\w+):\s*(.+)', line)
+            if m:
+                answers[m.group(1)] = m.group(2).strip()
+            m = re.match(r'^JUSTIFICATION_(\w+):\s*(.+)', line)
+            if m:
+                justifications[m.group(1)] = m.group(2).strip()
+
+        # Store parsed results as side-channel for runner to access
+        self._parsed_answers = answers
+        self._parsed_justifications = justifications
+
+        # Build readable report text
         header = f"# Research Findings: {clean_question}\n\n"
+        main_report = header + report_text
 
         # Resolve citations
-        main_report = header + report_text
         final_report, citation_assignments = self.citation_registry.finalize_citations(main_report)
-
         if citation_assignments:
             references_section = self.citation_registry.generate_references_section()
             final_report += "\n" + references_section

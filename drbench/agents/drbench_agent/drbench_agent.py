@@ -358,48 +358,35 @@ class DrBenchAgent(BaseAgent):
 
             # Step 7: Evolve action plan based on findings (if adaptive actions enabled)
             if iteration_findings and self.use_adaptive_actions:
-                if self.verbose:
-                    logger.debug("📊 Analyzing source composition for adaptive planning...")
+                cfg = get_run_config()
 
-                # Get source composition analysis
-                source_analysis = self.action_planner._analyze_source_composition(iteration_findings)
-
-                if self.verbose:
-                    logger.debug(
-                        f"   Internal/Enterprise: {'✅' if source_analysis['has_internal'] or source_analysis['has_enterprise'] else '❌'}"  # noqa: E501
-                    )
-                    logger.debug(f"   External Sources: {'✅' if source_analysis['has_external'] else '❌'}")
-
-                    if source_analysis["gaps"]:
-                        logger.debug(f"   🎯 Identified gaps: {', '.join(source_analysis['gaps'])}")
+                # In QA mode, skip source composition analysis (handled by lightweight
+                # action-type counts in the adaptive prompt itself)
+                if cfg.report_style != "concise_qa":
+                    if self.verbose:
+                        logger.debug("📊 Analyzing source composition for adaptive planning...")
+                    source_analysis = self.action_planner._analyze_source_composition(iteration_findings)
+                    if self.verbose:
+                        logger.debug(
+                            f"   Internal/Enterprise: {'✅' if source_analysis['has_internal'] or source_analysis['has_enterprise'] else '❌'}"  # noqa: E501
+                        )
+                        logger.debug(f"   External Sources: {'✅' if source_analysis['has_external'] else '❌'}")
+                        if source_analysis["gaps"]:
+                            logger.debug(f"   🎯 Identified gaps: {', '.join(source_analysis['gaps'])}")
 
                 new_actions = self.action_planner.evolve_action_plan(
                     action_plan.id, iteration_findings, context, self.tool_registry
                 )
                 if new_actions and self.verbose:
-                    logger.info(f"🔄 Added {len(new_actions)} new actions to address source gaps")
+                    logger.info(f"🔄 Added {len(new_actions)} new adaptive actions")
                     for action in new_actions:
-                        source_type = "🌐 External"
-                        if action.type in [
-                            ActionType.ENTERPRISE_API,
-                            ActionType.MCP_QUERY,
-                        ]:
-                            source_type = "🏢 Enterprise"
-                        elif action.type in [
-                            ActionType.LOCAL_DOCUMENT_SEARCH,
-                            ActionType.LOCAL_FILE_ANALYSIS,
-                        ]:
-                            source_type = "📁 Local Docs"
-                        elif action.type in [
-                            ActionType.CONTEXT_SYNTHESIS,
-                            ActionType.DATA_ANALYSIS,
-                        ]:
-                            source_type = "🧪 Analysis"
                         logger.info(
-                            f"   {source_type} | Priority: {action.priority:.1f} | {action.description[:100]}..."
+                            f"   {action.type.value} | Priority: {action.priority:.1f} | {action.description[:100]}..."
                         )
 
             action_plan.current_iteration = iteration + 1
+            # Save incrementally so partial results survive crashes
+            self._save_final_action_plan(action_plan)
 
             # Check if we should continue with enhanced completion criteria
             if action_plan.is_complete():

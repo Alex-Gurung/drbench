@@ -186,8 +186,12 @@ details pre {{ background: var(--bg); border: 1px solid var(--border); border-ra
 .priv-table th {{ text-align: left; padding: 8px 10px; background: var(--bg); border-bottom: 2px solid var(--border); font-size: 11px; text-transform: uppercase; color: var(--text-muted); }}
 .priv-table td {{ padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }}
 .priv-table tr:hover {{ background: var(--primary-light); }}
-.badge-leaked {{ background: #fee2e2; color: #991b1b; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }}
-.badge-safe {{ background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }}
+.badge-leaked {{ background: #fee2e2; color: #991b1b; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
+.badge-safe {{ background: #dcfce7; color: #166534; padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
+.badge-rules-leaked {{ background: #dbeafe; color: #1e40af; padding: 1px 5px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
+.badge-rules-safe {{ background: #eff6ff; color: #93c5fd; padding: 1px 5px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
+.badge-adv-leaked {{ background: #fee2e2; color: #991b1b; padding: 1px 5px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
+.badge-adv-safe {{ background: #fef2f2; color: #fca5a5; padding: 1px 5px; border-radius: 8px; font-size: 9px; font-weight: 600; }}
 .badge-insight {{ background: #dbeafe; color: #1e40af; }}
 .badge-distractor {{ background: #f3e8ff; color: #6b21a8; }}
 
@@ -196,6 +200,37 @@ details pre {{ background: var(--bg); border: 1px solid var(--border); border-ra
 .query-list li {{ padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: 13px; font-family: ui-monospace, SFMono-Regular, monospace; }}
 .query-list li:nth-child(odd) {{ background: var(--bg); }}
 .query-num {{ color: var(--text-muted); margin-right: 6px; }}
+
+/* Privacy summary cards at top of privacy tab */
+.priv-summary {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }}
+.priv-summary-card {{ border-radius: 8px; padding: 16px; }}
+.priv-summary-card h4 {{ font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }}
+.priv-summary-card.rules {{ background: #eff6ff; border: 2px solid #bfdbfe; }}
+.priv-summary-card.rules h4 {{ color: #1e40af; }}
+.priv-summary-card.adversary {{ background: #fef2f2; border: 2px solid #fecaca; }}
+.priv-summary-card.adversary h4 {{ color: #991b1b; }}
+.priv-stat-row {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }}
+.priv-stat-big {{ font-size: 28px; font-weight: 800; line-height: 1; }}
+.priv-link {{ display: inline-block; margin-top: 8px; font-size: 11px; color: var(--primary); cursor: pointer; text-decoration: underline; }}
+.priv-link:hover {{ color: var(--text); }}
+
+/* Summary view */
+.summary-view {{ padding: 24px; max-width: 1400px; margin: 0 auto; }}
+.summary-view h2 {{ font-size: 18px; font-weight: 700; margin-bottom: 16px; color: var(--primary); }}
+.summary-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+.summary-table th {{ text-align: left; padding: 8px 12px; background: var(--primary-light); border-bottom: 2px solid var(--primary); font-size: 11px; text-transform: uppercase; color: var(--primary); font-weight: 700; position: sticky; top: 0; z-index: 1; }}
+.summary-table td {{ padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }}
+.summary-table tr:hover {{ background: var(--primary-light); }}
+.summary-table .q-cell {{ line-height: 1.6; }}
+.summary-table .q-cell .hop-line {{ display: flex; gap: 6px; align-items: baseline; margin-bottom: 2px; }}
+.summary-table .q-cell .hop-num {{ font-weight: 700; color: var(--primary); min-width: 18px; font-size: 11px; }}
+.summary-table .q-cell .hop-badge {{ font-size: 9px; padding: 1px 5px; border-radius: 6px; font-weight: 600; }}
+.summary-table .q-cell .hop-q {{ flex: 1; }}
+.summary-table .q-cell .hop-arrow {{ color: var(--text-muted); }}
+.summary-table .q-cell .hop-a {{ color: var(--success); font-weight: 700; white-space: nowrap; }}
+.summary-table .final-answer {{ font-weight: 700; color: var(--success); font-size: 14px; }}
+.summary-toggle {{ background: var(--primary); color: white; border: none; border-radius: 6px; padding: 6px 14px; font-size: 12px; font-weight: 600; cursor: pointer; margin-left: auto; }}
+.summary-toggle:hover {{ opacity: 0.9; }}
 
 /* Scrollbar */
 ::-webkit-scrollbar {{ width: 7px; height: 7px; }}
@@ -209,7 +244,10 @@ details pre {{ background: var(--bg); border: 1px solid var(--border); border-ra
 <body>
 
 <header>
-  <h1>Chain Viewer</h1>
+  <div style="display:flex;align-items:center;gap:16px">
+    <h1 style="flex:1">Chain Viewer</h1>
+    <button class="summary-toggle" id="btn-summary" onclick="toggleSummary()">Summary View</button>
+  </div>
   <div class="stats" id="stats-bar"></div>
 </header>
 
@@ -220,11 +258,17 @@ details pre {{ background: var(--bg); border: 1px solid var(--border); border-ra
     <select id="f-company"><option value="">All</option></select></div>
   <div><span class="filter-label">Status</span>
     <select id="f-status"><option value="">All</option><option value="valid">Valid</option><option value="invalid">Invalid</option><option value="incomplete">Incomplete</option></select></div>
+  <div><span class="filter-label">Rules</span>
+    <select id="f-rules"><option value="">All</option><option value="leaked">Leaked</option><option value="safe">Safe</option><option value="untested">Not Tested</option></select></div>
+  <div><span class="filter-label">Adversary</span>
+    <select id="f-adversary"><option value="">All</option><option value="leaked">Leaked</option><option value="safe">Safe</option><option value="untested">Not Tested</option></select></div>
   <div><span class="filter-label">Search</span>
     <input type="text" id="f-search" placeholder="Question, answer, entity..."></div>
 </div>
 
-<div class="layout">
+<div id="summary-view" class="summary-view" style="display:none;height:calc(100vh - 110px);overflow-y:auto"></div>
+
+<div class="layout" id="detail-layout">
   <div class="sidebar" id="chain-list"></div>
   <div class="detail" id="detail">
     <div class="no-results">Select a chain from the sidebar</div>
@@ -239,6 +283,74 @@ function esc(s) {{ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
 function trunc(s, n) {{ return s && s.length > n ? s.slice(0, n) + '...' : (s || ''); }}
 
 let selectedIdx = null;
+let summaryMode = false;
+
+function toggleSummary() {{
+  summaryMode = !summaryMode;
+  document.getElementById('summary-view').style.display = summaryMode ? 'block' : 'none';
+  document.getElementById('detail-layout').style.display = summaryMode ? 'none' : 'grid';
+  document.querySelector('.filters').style.display = summaryMode ? 'none' : 'flex';
+  document.getElementById('btn-summary').textContent = summaryMode ? 'Detail View' : 'Summary View';
+  if (summaryMode) renderSummary();
+}}
+
+function renderSummary() {{
+  const el = document.getElementById('summary-view');
+  // Group by company
+  const byCompany = {{}};
+  CHAINS.forEach(c => {{
+    const co = c.metadata?.company || 'Unknown';
+    if (!byCompany[co]) byCompany[co] = [];
+    byCompany[co].push(c);
+  }});
+
+  let h = '';
+  for (const [company, chains] of Object.entries(byCompany)) {{
+    h += `<h2>${{esc(company)}} (${{chains.length}} chains)</h2>`;
+    h += `<table class="summary-table"><thead><tr>`;
+    h += `<th style="width:60px">Pattern</th>`;
+    h += `<th style="width:70px">Task</th>`;
+    h += `<th>Questions &amp; Answers</th>`;
+    h += `<th style="width:90px">Final Answer</th>`;
+    h += `<th style="width:60px">Status</th>`;
+    h += `</tr></thead><tbody>`;
+
+    for (const c of chains) {{
+      const hops = c.hops || [];
+      const s = getStatus(c);
+      const nqLines = (c.numbered_questions || '').split('\\n').filter(l => l.trim());
+
+      h += `<tr>`;
+      h += `<td><span class="badge badge-L">${{esc(c.pattern)}}</span></td>`;
+      h += `<td style="font-family:monospace;font-size:11px">${{esc(c.metadata?.task_id || '')}}</td>`;
+
+      // Questions cell with all hops
+      h += `<td class="q-cell">`;
+      for (let i = 0; i < hops.length; i++) {{
+        const hop = hops[i];
+        const isFinal = i === hops.length - 1;
+        const qText = (i < nqLines.length) ? nqLines[i].replace(/^[0-9]+[^a-zA-Z]*/, '') : hop.question;
+        const typeBadge = hop.hop_type === 'L'
+          ? '<span class="hop-badge" style="background:var(--primary-light);color:var(--primary)">L</span>'
+          : '<span class="hop-badge" style="background:#f3e8ff;color:var(--web)">W</span>';
+        h += `<div class="hop-line${{isFinal ? ' nq-final' : ''}}">`;
+        h += `<span class="hop-num">${{i+1}}.</span>`;
+        h += typeBadge;
+        h += `<span class="hop-q">${{esc(qText)}}</span>`;
+        h += `<span class="hop-arrow">&rarr;</span>`;
+        h += `<span class="hop-a">${{esc(hop.answer)}}</span>`;
+        h += `</div>`;
+      }}
+      h += `</td>`;
+
+      h += `<td class="final-answer">${{esc(c.global_answer || hops[hops.length-1]?.answer || '')}}</td>`;
+      h += `<td><span class="badge badge-${{s}}">${{s}}</span></td>`;
+      h += `</tr>`;
+    }}
+    h += `</tbody></table>`;
+  }}
+  el.innerHTML = h;
+}}
 
 function getStatus(c) {{
   if (!c.metadata?.complete) return 'incomplete';
@@ -246,16 +358,62 @@ function getStatus(c) {{
   return 'invalid';
 }}
 
+function getPrivacySummary(c) {{
+  if (!c.agent_run) return null;
+  const pe = c.privacy_eval || {{}};
+  const qc = pe.quick_check || {{}};
+  const ae = pe.adversary_eval || {{}};
+  const s = ae.summary || {{}};
+  const companyLeak = qc.company_name_leaked || false;
+  const metricsLeak = (qc.metrics_leaked || 0) > 0;
+  const insightsLeak = (s.insights_leaked || 0) > 0;
+  const distractorsLeak = (s.distractors_leaked || 0) > 0;
+  const anyLeak = companyLeak || metricsLeak || insightsLeak;
+  return {{
+    companyLeak, metricsLeak, insightsLeak, distractorsLeak, anyLeak,
+    metricsLeaked: qc.metrics_leaked||0, metricsTotal: qc.metrics_total||0,
+    insightsLeaked: s.insights_leaked||0, insightsTotal: s.insights_total||0,
+    distractorsLeaked: s.distractors_leaked||0, distractorsTotal: s.distractors_total||0,
+  }};
+}}
+
+function getRulesFilter(c) {{
+  if (!c.agent_run) return 'untested';
+  const qc = (c.privacy_eval || {{}}).quick_check || {{}};
+  return (qc.company_name_leaked || (qc.metrics_leaked || 0) > 0) ? 'leaked' : 'safe';
+}}
+
+function getAdvFilter(c) {{
+  if (!c.agent_run) return 'untested';
+  const s = ((c.privacy_eval || {{}}).adversary_eval || {{}}).summary || {{}};
+  return ((s.insights_leaked || 0) > 0 || (s.distractors_leaked || 0) > 0) ? 'leaked' : 'safe';
+}}
+
 // Init
 (function() {{
   // Stats bar
+  const tested = CHAINS.filter(c => c.agent_run);
   const sb = document.getElementById('stats-bar');
-  sb.innerHTML = `
+  let statsHtml = `
     <div class="stat"><span class="stat-value">${{STATS.total}}</span> chains</div>
     <div class="stat"><span class="stat-value" style="color:var(--success)">${{STATS.valid}}</span> valid</div>
     <div class="stat"><span class="stat-value">${{STATS.complete}}</span> complete</div>
     ${{Object.entries(STATS.by_pattern).map(([p,n]) => `<div class="stat"><span class="stat-value">${{p}}</span>: ${{n}}</div>`).join('')}}
   `;
+  if (tested.length) {{
+    const aggRulesLeak = tested.filter(c => getRulesFilter(c) === 'leaked').length;
+    const aggAdvLeak = tested.filter(c => getAdvFilter(c) === 'leaked').length;
+    const aggInsights = tested.reduce((a,c) => a + (c.privacy_eval?.adversary_eval?.summary?.insights_leaked||0), 0);
+    const aggInsightsTotal = tested.reduce((a,c) => a + (c.privacy_eval?.adversary_eval?.summary?.insights_total||0), 0);
+    statsHtml += `
+      <div class="stat" style="border-left:1px solid var(--border);padding-left:12px">
+        <span class="stat-value">${{tested.length}}</span> tested</div>
+      <div class="stat"><span class="stat-value" style="color:${{aggRulesLeak > 0 ? 'var(--danger)' : 'var(--success)'}}">${{aggRulesLeak}}</span> rules leaked</div>
+      <div class="stat"><span class="stat-value" style="color:${{aggAdvLeak > 0 ? 'var(--danger)' : 'var(--success)'}}">${{aggAdvLeak}}</span> adv leaked</div>
+      <div class="stat"><span class="stat-value" style="color:${{aggInsights > 0 ? 'var(--danger)' : 'var(--success)'}}">${{aggInsights}}/${{aggInsightsTotal}}</span> insights</div>
+    `;
+  }}
+  sb.innerHTML = statsHtml;
 
   // Populate filters
   for (const p of Object.keys(STATS.by_pattern)) {{
@@ -267,7 +425,7 @@ function getStatus(c) {{
     document.getElementById('f-company').appendChild(o);
   }}
 
-  ['f-pattern','f-company','f-status'].forEach(id =>
+  ['f-pattern','f-company','f-status','f-rules','f-adversary'].forEach(id =>
     document.getElementById(id).addEventListener('change', renderList));
   document.getElementById('f-search').addEventListener('input', renderList);
 
@@ -279,15 +437,21 @@ function renderList() {{
   const pat = document.getElementById('f-pattern').value;
   const comp = document.getElementById('f-company').value;
   const stat = document.getElementById('f-status').value;
+  const rulesF = document.getElementById('f-rules').value;
+  const advF = document.getElementById('f-adversary').value;
   const search = document.getElementById('f-search').value.toLowerCase();
 
   const el = document.getElementById('chain-list');
   let h = '';
   CHAINS.forEach((c, i) => {{
     const s = getStatus(c);
+    const rf = getRulesFilter(c);
+    const af = getAdvFilter(c);
     if (pat && c.pattern !== pat) return;
     if (comp && (c.metadata?.company||'') !== comp) return;
     if (stat && s !== stat) return;
+    if (rulesF && rf !== rulesF) return;
+    if (advF && af !== advF) return;
     if (search) {{
       const text = JSON.stringify(c).toLowerCase();
       if (!text.includes(search)) return;
@@ -296,6 +460,7 @@ function renderList() {{
     const badgeCls = 'badge-' + s;
     const nHops = (c.hops||[]).length;
     const firstQ = c.hops?.[0]?.question || '';
+    const ps = getPrivacySummary(c);
 
     h += `<div class="chain-item ${{i === selectedIdx ? 'selected' : ''}}" onclick="showChain(${{i}})">`;
     h += `<div class="chain-q">${{esc(firstQ)}}</div>`;
@@ -303,7 +468,20 @@ function renderList() {{
     h += `<span class="badge badge-L">${{esc(c.pattern)}}</span> `;
     h += `<span class="badge ${{badgeCls}}">${{s}}</span> `;
     h += `<span>${{nHops}} hops</span> `;
-    if (c.agent_run) h += `<span class="badge" style="background:#e0f2fe;color:#075985">TESTED</span> `;
+    if (ps) {{
+      // Rules pill
+      const rulesLeak = ps.companyLeak || ps.metricsLeaked > 0;
+      const rTip = rulesLeak
+        ? `Rules: Co=${{ps.companyLeak ? 'YES' : 'no'}}, ${{ps.metricsLeaked}}/${{ps.metricsTotal}} metrics`
+        : 'Rules: no regex matches';
+      h += `<span class="badge ${{rulesLeak ? 'badge-rules-leaked' : 'badge-rules-safe'}}" title="${{esc(rTip)}}">R:${{rulesLeak ? 'LEAK' : 'OK'}}</span> `;
+      // Adversary pill
+      const advLeak = ps.insightsLeaked > 0 || ps.distractorsLeaked > 0;
+      const aTip = advLeak
+        ? `Adversary: ${{ps.insightsLeaked}}/${{ps.insightsTotal}} insights, ${{ps.distractorsLeaked}} distractors`
+        : 'Adversary: could not infer private info';
+      h += `<span class="badge ${{advLeak ? 'badge-adv-leaked' : 'badge-adv-safe'}}" title="${{esc(aTip)}}">A:${{advLeak ? 'LEAK' : 'OK'}}</span> `;
+    }}
     h += `<span>${{esc(c.metadata?.company||'')}}</span>`;
     h += `</div></div>`;
   }});
@@ -313,6 +491,11 @@ function renderList() {{
 function switchTab(tabId) {{
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tabId));
+}}
+
+function scrollToSection(sectionId) {{
+  const el = document.getElementById(sectionId);
+  if (el) el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
 }}
 
 function showChain(idx) {{
@@ -340,7 +523,8 @@ function showChain(idx) {{
   // Tabs
   h += `<div class="tab-bar">`;
   h += `<div class="tab active" data-tab="chain" onclick="switchTab('chain')">Chain Details</div>`;
-  if (hasAgent) h += `<div class="tab" data-tab="privacy" onclick="switchTab('privacy')">Agent Privacy</div>`;
+  if (hasAgent) h += `<div class="tab" data-tab="agent" onclick="switchTab('agent')">Agent Process</div>`;
+  if (hasAgent) h += `<div class="tab" data-tab="privacy" onclick="switchTab('privacy')">Privacy Eval</div>`;
   h += `</div>`;
 
   // =====================================================
@@ -432,9 +616,9 @@ function showChain(idx) {{
       const label = chk.step === 'check_intra' ? 'Check Intra' : 'Check Inter';
       h += `<div class="trace-step ${{cls}}"><div class="trace-label">${{label}}</div>`;
       h += `<span style="color:var(${{chk.passed ? '--success' : '--danger'}})">${{icon}}</span> `;
-      if (chk.passed) h += `${{esc(trunc(chk.question||'', 80))}} &rarr; <strong>${{esc(chk.answer||'')}}</strong>`;
+      if (chk.passed) h += `${{esc(chk.question||'')}} &rarr; <strong>${{esc(chk.answer||'')}}</strong>`;
       else h += `${{esc(chk.error || 'failed')}}`;
-      if (chk.quote) h += `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic">"${{esc(trunc(chk.quote, 120))}}"</div>`;
+      if (chk.quote) h += `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic;word-break:break-word">"${{esc(chk.quote)}}"</div>`;
       h += `</div>`;
     }}
     if (hop.doc_text) h += `<details><summary>Document text (${{hop.doc_text.length}} chars)</summary><pre>${{esc(hop.doc_text)}}</pre></details>`;
@@ -474,7 +658,163 @@ function showChain(idx) {{
   h += `</div>`; // end panel-chain
 
   // =====================================================
-  // TAB 2: Agent Privacy (only if agent_run data exists)
+  // TAB 2: Agent Process (research plan, iterations, report)
+  // =====================================================
+  if (hasAgent) {{
+    h += `<div class="tab-panel" id="panel-agent">`;
+    const ar2 = c.agent_run || {{}};
+    const plan = ar2.action_plan || {{}};
+    const report = ar2.report;
+    const iterPrompts = ar2.iteration_prompts || [];
+    const actions = plan.actions || [];
+
+    // Agent run stats
+    h += `<div class="agent-card"><h3>Agent Run Overview</h3>`;
+    h += `<div class="agent-stats">`;
+    h += `<div class="agent-stat"><div class="stat-num">${{(ar2.web_searches||[]).length}}</div><div class="stat-label">Web Searches</div></div>`;
+    h += `<div class="agent-stat"><div class="stat-num">${{(ar2.local_searches||[]).length}}</div><div class="stat-label">Local Searches</div></div>`;
+    h += `<div class="agent-stat"><div class="stat-num">${{ar2.total_actions||0}}</div><div class="stat-label">Total Actions</div></div>`;
+    h += `<div class="agent-stat"><div class="stat-num">${{plan.current_iteration||'?'}}/${{plan.max_iterations||'?'}}</div><div class="stat-label">Iterations</div></div>`;
+    h += `<div class="agent-stat"><div class="stat-num">${{ar2.elapsed_seconds||0}}s</div><div class="stat-label">Elapsed</div></div>`;
+    h += `</div>`;
+    if (ar2.model) h += `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Model: ${{esc(ar2.model)}}</div>`;
+    if (ar2.error) h += `<div style="margin-top:8px;color:var(--danger);font-size:13px">Error: ${{esc(ar2.error)}}</div>`;
+    h += `</div>`;
+
+    // Research query
+    if (plan.research_query) {{
+      h += `<div class="agent-card"><h3>Research Query</h3>`;
+      h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.5">${{esc(plan.research_query)}}</pre>`;
+      h += `</div>`;
+    }}
+
+    // Research plan
+    const rp = plan.research_plan;
+    if (rp) {{
+      h += `<div class="agent-card"><h3>Research Plan</h3>`;
+      if (typeof rp === 'string') {{
+        h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:400px;overflow:auto">${{esc(rp)}}</pre>`;
+      }} else {{
+        h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5;max-height:400px;overflow:auto">${{esc(JSON.stringify(rp, null, 2))}}</pre>`;
+      }}
+      h += `</div>`;
+    }}
+
+    // Iteration-by-iteration actions
+    if (actions.length) {{
+      // Separate completed from pending
+      const completed = actions.filter(a => a.status === 'completed' || a.status === 'failed');
+      const pending = actions.filter(a => a.status !== 'completed' && a.status !== 'failed');
+
+      // Group completed actions by iteration
+      const byIter = {{}};
+      for (const a of completed) {{
+        const it = a.iteration_completed ?? 0;
+        if (!byIter[it]) byIter[it] = [];
+        byIter[it].push(a);
+      }}
+      const iterKeys = Object.keys(byIter).sort((a,b) => Number(a) - Number(b));
+
+      // Helpers
+      const getToolName = (a) => a.type || a.actual_output?.tool || '?';
+      const getQuery = (a) => a.parameters?.query || a.description || '';
+      const getSnippet = (a) => a.actual_output?.synthesis || '';
+      const isWeb = (tn) => tn.includes('web') || tn.includes('browse');
+      const isLocal = (tn) => tn.includes('local');
+
+      h += `<div class="agent-card"><h3>Agent Iterations (${{iterKeys.length}} iterations, ${{completed.length}} completed, ${{pending.length}} pending)</h3>`;
+
+      for (const iterKey of iterKeys) {{
+        const iterActions = byIter[iterKey];
+        const webCount = iterActions.filter(a => isWeb(getToolName(a))).length;
+        const localCount = iterActions.filter(a => isLocal(getToolName(a))).length;
+
+        h += `<details style="margin-bottom:8px"${{iterKeys.length <= 3 ? ' open' : ''}}>`;
+        h += `<summary style="font-size:13px;font-weight:600;cursor:pointer;padding:4px 0">`;
+        h += `Iteration ${{Number(iterKey)+1}} &mdash; ${{iterActions.length}} actions`;
+        const parts = [];
+        if (webCount) parts.push(`${{webCount}} web`);
+        if (localCount) parts.push(`${{localCount}} local`);
+        if (parts.length) h += ` (${{parts.join(', ')}})`;
+        h += `</summary>`;
+        h += `<div style="margin-top:6px">`;
+
+        for (const a of iterActions) {{
+          const tn = getToolName(a);
+          const toolBadge = isWeb(tn) ? 'badge-W' : isLocal(tn) ? 'badge-L' : '';
+          const statusColor = a.status === 'completed' ? 'var(--success)' : 'var(--danger)';
+          const query = getQuery(a);
+
+          h += `<div style="padding:8px 12px;margin:4px 0;background:var(--bg);border-radius:6px;font-size:12px;border-left:3px solid ${{statusColor}}">`;
+          h += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">`;
+          h += `<span class="badge ${{toolBadge}}" style="font-size:10px">${{esc(tn)}}</span>`;
+          h += `<span style="font-family:monospace;flex:1">${{esc(trunc(query, 120))}}</span>`;
+          h += `<span style="color:${{statusColor}};font-size:10px;white-space:nowrap">[${{a.status}}]</span>`;
+          h += `</div>`;
+
+          const snippet = getSnippet(a);
+          if (snippet) {{
+            h += `<details style="margin-top:4px"><summary style="font-size:10px;color:var(--text-muted);cursor:pointer">Show result (${{snippet.length}} chars)</summary>`;
+            h += `<div style="color:var(--text-muted);font-size:11px;margin-top:4px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-word;line-height:1.4">${{esc(trunc(snippet, 1000))}}</div>`;
+            h += `</details>`;
+          }}
+          h += `</div>`;
+        }}
+        h += `</div></details>`;
+      }}
+
+      // Pending actions summary
+      if (pending.length) {{
+        h += `<details style="margin-bottom:8px">`;
+        h += `<summary style="font-size:13px;font-weight:600;cursor:pointer;padding:4px 0;color:var(--text-muted)">`;
+        h += `${{pending.length}} pending actions (never executed)</summary>`;
+        h += `<div style="margin-top:6px">`;
+        for (const a of pending) {{
+          const tn = getToolName(a);
+          const toolBadge = isWeb(tn) ? 'badge-W' : isLocal(tn) ? 'badge-L' : '';
+          h += `<div style="padding:6px 12px;margin:3px 0;background:var(--bg);border-radius:6px;font-size:11px;border-left:3px solid var(--border);opacity:0.6">`;
+          h += `<span class="badge ${{toolBadge}}" style="font-size:10px">${{esc(tn)}}</span> `;
+          h += `<span style="font-family:monospace">${{esc(trunc(getQuery(a), 100))}}</span>`;
+          h += `</div>`;
+        }}
+        h += `</div></details>`;
+      }}
+
+      h += `</div>`;
+    }}
+
+    // Per-iteration prompts
+    if (iterPrompts.length) {{
+      h += `<div class="agent-card"><h3>Agent Prompts (${{iterPrompts.length}} files)</h3>`;
+      for (const p of iterPrompts) {{
+        const isAction = p.filename.includes('action');
+        const label = p.filename.replace('.txt', '');
+        h += `<details style="margin-bottom:6px"><summary style="font-size:12px;font-weight:600;cursor:pointer">`;
+        h += `${{isAction ? '&#9881;' : '&#128270;'}} ${{esc(label)}}`;
+        h += `</summary>`;
+        h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:4px;max-height:400px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-word;line-height:1.4">${{esc(p.content)}}</pre>`;
+        h += `</details>`;
+      }}
+      h += `</div>`;
+    }}
+
+    // Final report
+    if (report) {{
+      h += `<div class="agent-card"><h3>Agent Final Report</h3>`;
+      const reportText = typeof report === 'string' ? report : JSON.stringify(report, null, 2);
+      h += `<pre style="background:var(--card);border:2px solid var(--primary);border-radius:8px;padding:16px;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.6;max-height:600px;overflow:auto">${{esc(reportText)}}</pre>`;
+      h += `</div>`;
+    }} else if (ar2.error) {{
+      h += `<div class="agent-card"><h3>Agent Final Report</h3>`;
+      h += `<div style="color:var(--danger);padding:16px">Agent failed: ${{esc(ar2.error)}}</div>`;
+      h += `</div>`;
+    }}
+
+    h += `</div>`; // end panel-agent
+  }}
+
+  // =====================================================
+  // TAB 3: Privacy Eval
   // =====================================================
   if (hasAgent) {{
     h += `<div class="tab-panel" id="panel-privacy">`;
@@ -485,20 +825,88 @@ function showChain(idx) {{
     const ae = pe.adversary_eval || {{}};
     const summary = ae.summary || {{}};
 
-    // Agent run summary
-    h += `<div class="agent-card"><h3>Agent Run</h3>`;
-    h += `<div class="agent-stats">`;
-    h += `<div class="agent-stat"><div class="stat-num">${{(ar.web_searches||[]).length}}</div><div class="stat-label">Web Searches</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num">${{(ar.local_searches||[]).length}}</div><div class="stat-label">Local Searches</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num">${{ar.total_actions||0}}</div><div class="stat-label">Total Actions</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num">${{ar.elapsed_seconds||0}}s</div><div class="stat-label">Elapsed</div></div>`;
+    // ---- PRIVACY SUMMARY AT TOP ----
+    h += `<div class="priv-summary">`;
+
+    // Rules-based card
+    const rulesAnyLeak = qc.company_name_leaked || (qc.metrics_leaked||0) > 0;
+    h += `<div class="priv-summary-card rules">`;
+    h += `<h4>&#128270; Rules-Based Check</h4>`;
+    h += `<p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Regex scan of web queries for company name and metric values ($$, %%, counts)</p>`;
+    h += `<div class="priv-stat-row">`;
+    h += `<span class="priv-stat-big" style="color:${{rulesAnyLeak ? 'var(--danger)' : 'var(--success)'}}">${{rulesAnyLeak ? 'LEAKED' : 'SAFE'}}</span>`;
     h += `</div>`;
-    if (ar.model) h += `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Model: ${{esc(ar.model)}}</div>`;
-    if (ar.error) h += `<div style="margin-top:8px;color:var(--danger);font-size:13px">Error: ${{esc(ar.error)}}</div>`;
+    h += `<div class="priv-stat-row"><strong>Company name:</strong>&nbsp;`;
+    h += qc.company_name_leaked
+      ? `<span style="color:var(--danger);font-weight:700">YES</span> &mdash; "${{esc(qc.company_name)}}" found in queries`
+      : `<span style="color:var(--success)">No</span>`;
+    h += `</div>`;
+    h += `<div class="priv-stat-row"><strong>Metrics:</strong>&nbsp;`;
+    h += `<span style="color:${{(qc.metrics_leaked||0) > 0 ? 'var(--danger)' : 'var(--success)'}};font-weight:600">${{qc.metrics_leaked||0}}/${{qc.metrics_total||0}}</span> values found in queries`;
+    h += `</div>`;
+    const lv = qc.leaked_values || [];
+    if (lv.length) {{
+      h += `<div style="margin-top:4px">`;
+      for (const [vtype, val] of lv) {{
+        h += `<span class="badge badge-leaked" style="margin-right:4px">${{esc(vtype)}}: ${{esc(val)}}</span>`;
+      }}
+      h += `</div>`;
+    }}
+    h += `<span class="priv-link" onclick="scrollToSection('sec-rules-detail')">View details &darr;</span>`;
     h += `</div>`;
 
-    // Document retrieval
-    h += `<div class="agent-card"><h3>Document Retrieval (${{dr.found_count||0}}/${{dr.total_count||0}} hops found)</h3>`;
+    // LLM Adversary card
+    const advAnyLeak = (summary.insights_leaked||0) > 0 || (summary.distractors_leaked||0) > 0;
+    h += `<div class="priv-summary-card adversary">`;
+    h += `<h4>&#129302; LLM Adversary</h4>`;
+    h += `<p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">LLM sees ONLY web queries, tries to answer private enterprise questions. Scorer LLM judges correctness.</p>`;
+    h += `<div class="priv-stat-row">`;
+    h += `<span class="priv-stat-big" style="color:${{advAnyLeak ? 'var(--danger)' : 'var(--success)'}}">${{advAnyLeak ? 'LEAKED' : 'SAFE'}}</span>`;
+    h += `</div>`;
+    h += `<div class="priv-stat-row"><strong>Insights:</strong>&nbsp;`;
+    h += `<span style="color:${{(summary.insights_leaked||0) > 0 ? 'var(--danger)' : 'var(--success)'}};font-weight:600">${{summary.insights_leaked||0}}/${{summary.insights_total||0}}</span> leaked`;
+    h += `</div>`;
+    h += `<div class="priv-stat-row"><strong>Distractors:</strong>&nbsp;`;
+    h += `<span style="color:${{(summary.distractors_leaked||0) > 0 ? 'var(--danger)' : 'var(--success)'}};font-weight:600">${{summary.distractors_leaked||0}}/${{summary.distractors_total||0}}</span> leaked`;
+    h += `</div>`;
+    h += `<span class="priv-link" onclick="scrollToSection('sec-adversary-detail')">View per-question results &darr;</span>`;
+    h += `<span class="priv-link" style="margin-left:10px" onclick="scrollToSection('sec-adversary-prompts')">View prompts &darr;</span>`;
+    h += `</div>`;
+
+    h += `</div>`; // end priv-summary
+
+    // ---- WEB QUERIES (the raw data) ----
+    const ws = ar.web_searches || [];
+    if (ws.length) {{
+      h += `<div class="agent-card" id="sec-queries"><h3>Web Search Queries (${{ws.length}})</h3>`;
+      h += `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">These are the queries the agent sent to the web search API. Both evaluation methods analyze these.</p>`;
+      h += `<ul class="query-list">`;
+      for (let i = 0; i < ws.length; i++) {{
+        h += `<li><span class="query-num">${{i+1}}.</span> ${{esc(ws[i].query)}}</li>`;
+      }}
+      h += `</ul></div>`;
+    }}
+
+    // ---- RULES-BASED DETAIL ----
+    h += `<div class="agent-card" id="sec-rules-detail"><h3>&#128270; Rules-Based Check &mdash; Details</h3>`;
+    h += `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Deterministic regex scan: exact match of company name and specific metric values from eval.json against web queries.</p>`;
+    h += `<div class="agent-stats">`;
+    h += `<div class="agent-stat"><div class="stat-num" style="color:${{qc.company_name_leaked ? 'var(--danger)' : 'var(--success)'}}">${{qc.company_name_leaked ? 'YES' : 'No'}}</div><div class="stat-label">Company Name</div></div>`;
+    h += `<div class="agent-stat"><div class="stat-num" style="color:${{(qc.metrics_leaked||0) > 0 ? 'var(--danger)' : 'var(--success)'}}">${{qc.metrics_leaked||0}}/${{qc.metrics_total||0}}</div><div class="stat-label">Metrics Matched</div></div>`;
+    h += `</div>`;
+    if (qc.company_name) h += `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Company: ${{esc(qc.company_name)}}</div>`;
+    if (lv.length) {{
+      h += `<div style="margin-top:8px"><strong style="font-size:12px">Leaked values:</strong> `;
+      for (const [vtype, val] of lv) {{
+        h += `<span class="badge badge-leaked" style="margin-right:4px">${{esc(vtype)}}: ${{esc(val)}}</span>`;
+      }}
+      h += `</div>`;
+    }}
+    h += `</div>`;
+
+    // ---- DOCUMENT RETRIEVAL ----
+    h += `<div class="agent-card" id="sec-doc-retrieval"><h3>Document Retrieval (${{dr.found_count||0}}/${{dr.total_count||0}} hops found)</h3>`;
+    h += `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Did the agent find the documents each chain hop depends on?</p>`;
     h += `<div class="doc-grid">`;
     for (const hop of (dr.per_hop || [])) {{
       const cls = hop.found ? 'found' : 'not-found';
@@ -520,24 +928,14 @@ function showChain(idx) {{
     }}
     h += `</div></div>`;
 
-    // Privacy overview
-    h += `<div class="agent-card"><h3>Privacy Leakage Overview</h3>`;
-    h += `<div class="agent-stats">`;
-    h += `<div class="agent-stat"><div class="stat-num" style="color:${{qc.company_name_leaked ? 'var(--danger)' : 'var(--success)'}}">${{qc.company_name_leaked ? 'YES' : 'No'}}</div><div class="stat-label">Company Name Leaked</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num" style="color:${{qc.metrics_leaked > 0 ? 'var(--danger)' : 'var(--success)'}}">${{qc.metrics_leaked||0}}/${{qc.metrics_total||0}}</div><div class="stat-label">Metrics Leaked (regex)</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num" style="color:${{summary.insights_leaked > 0 ? 'var(--danger)' : 'var(--success)'}}">${{summary.insights_leaked||0}}/${{summary.insights_total||0}}</div><div class="stat-label">Insights Leaked (LLM)</div></div>`;
-    h += `<div class="agent-stat"><div class="stat-num" style="color:${{summary.distractors_leaked > 0 ? 'var(--danger)' : 'var(--success)'}}">${{summary.distractors_leaked||0}}/${{summary.distractors_total||0}}</div><div class="stat-label">Distractors Leaked (LLM)</div></div>`;
-    h += `</div>`;
-    if (qc.company_name) h += `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Company: ${{esc(qc.company_name)}}</div>`;
-    h += `</div>`;
-
-    // Per-question privacy results table
+    // ---- LLM ADVERSARY DETAIL: per-question table ----
     const pq = ae.per_question || {{}};
     const pqKeys = Object.keys(pq);
     if (pqKeys.length) {{
-      h += `<div class="agent-card"><h3>Per-Question Results (${{pqKeys.length}} questions)</h3>`;
+      h += `<div class="agent-card" id="sec-adversary-detail"><h3>&#129302; LLM Adversary &mdash; Per-Question Results (${{pqKeys.length}} questions)</h3>`;
+      h += `<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Each row = one enterprise_fact question. The adversary tried to answer it from web queries alone.</p>`;
       h += `<table class="priv-table"><thead><tr>`;
-      h += `<th>ID</th><th>Type</th><th>Question</th><th>Ground Truth</th><th>Adversary</th><th>Score</th><th>Status</th>`;
+      h += `<th>ID</th><th>Type</th><th>Question</th><th>Ground Truth</th><th>Adversary Answer</th><th>Score</th><th>Status</th>`;
       h += `</tr></thead><tbody>`;
       for (const [qid, info] of Object.entries(pq)) {{
         const typeBadge = info.qa_type === 'insight' ? 'badge-insight' : 'badge-distractor';
@@ -545,42 +943,58 @@ function showChain(idx) {{
         h += `<tr>`;
         h += `<td style="white-space:nowrap;font-family:monospace;font-size:11px">${{esc(qid)}}</td>`;
         h += `<td><span class="badge ${{typeBadge}}">${{esc(info.qa_type)}}</span></td>`;
-        h += `<td>${{esc(trunc(info.question||'', 80))}}</td>`;
-        h += `<td style="font-size:12px">${{esc(trunc(info.ground_truth||'', 60))}}</td>`;
-        h += `<td style="font-size:12px">${{esc(trunc(info.adversary_answer||'', 60))}}</td>`;
+        h += `<td style="word-break:break-word">${{esc(info.question||'')}}</td>`;
+        h += `<td style="font-size:12px;word-break:break-word">${{esc(info.ground_truth||'')}}</td>`;
+        h += `<td style="font-size:12px;word-break:break-word;${{info.leaked ? 'color:var(--danger);font-weight:600' : ''}}">${{esc(info.adversary_answer||'')}}</td>`;
         h += `<td style="text-align:center;font-weight:600">${{info.score}}</td>`;
         h += `<td><span class="badge ${{statusBadge}}">${{info.leaked ? 'LEAKED' : 'SAFE'}}</span></td>`;
         h += `</tr>`;
         if (info.reason || info.adversary_reasoning) {{
           h += `<tr><td colspan="7" style="font-size:11px;color:var(--text-muted);padding:2px 10px 8px 10px">`;
-          if (info.adversary_reasoning) h += `Adversary: ${{esc(info.adversary_reasoning)}} `;
-          if (info.reason) h += `Scorer: ${{esc(info.reason)}}`;
+          if (info.adversary_reasoning) h += `<strong>Adversary reasoning:</strong> ${{esc(info.adversary_reasoning)}} `;
+          if (info.reason) h += `<br><strong>Scorer reason:</strong> ${{esc(info.reason)}}`;
           h += `</td></tr>`;
         }}
       }}
       h += `</tbody></table></div>`;
     }}
 
-    // Web search queries list
-    const ws = ar.web_searches || [];
-    if (ws.length) {{
-      h += `<div class="agent-card"><h3>Web Search Queries (${{ws.length}})</h3>`;
-      h += `<ul class="query-list">`;
-      for (let i = 0; i < ws.length; i++) {{
-        h += `<li><span class="query-num">${{i+1}}.</span> ${{esc(ws[i].query)}}</li>`;
+    // ---- ADVERSARY & SCORER PROMPTS ----
+    if (ae.adversary_prompt || ae.adversary_response || ae.scorer_prompt || ae.scorer_response) {{
+      h += `<div class="agent-card" id="sec-adversary-prompts"><h3>&#129302; LLM Adversary &mdash; Prompts &amp; Responses</h3>`;
+
+      if (ae.adversary_prompt) {{
+        h += `<details><summary style="font-size:13px;font-weight:600;cursor:pointer">Adversary Prompt (input to adversary LLM)</summary>`;
+        h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:6px;max-height:500px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5">${{esc(ae.adversary_prompt)}}</pre>`;
+        h += `</details>`;
       }}
-      h += `</ul></div>`;
+      if (ae.adversary_response) {{
+        h += `<details style="margin-top:8px"><summary style="font-size:13px;font-weight:600;cursor:pointer">Adversary Response (adversary LLM output)</summary>`;
+        h += `<pre style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:12px;margin-top:6px;max-height:500px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5">${{esc(ae.adversary_response)}}</pre>`;
+        h += `</details>`;
+      }}
+      if (ae.scorer_prompt) {{
+        h += `<details style="margin-top:8px"><summary style="font-size:13px;font-weight:600;cursor:pointer">Scorer Prompt (input to scorer LLM)</summary>`;
+        h += `<pre style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:6px;max-height:500px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5">${{esc(ae.scorer_prompt)}}</pre>`;
+        h += `</details>`;
+      }}
+      if (ae.scorer_response) {{
+        h += `<details style="margin-top:8px"><summary style="font-size:13px;font-weight:600;cursor:pointer">Scorer Response (scorer LLM output)</summary>`;
+        h += `<pre style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:12px;margin-top:6px;max-height:500px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word;line-height:1.5">${{esc(ae.scorer_response)}}</pre>`;
+        h += `</details>`;
+      }}
+      h += `</div>`;
     }}
 
-    // Local search queries list
+    // Local search queries
     const ls = ar.local_searches || [];
     if (ls.length) {{
-      h += `<details style="margin-top:8px"><summary style="font-size:13px;color:var(--text-muted)">Local Search Queries (${{ls.length}})</summary>`;
+      h += `<div class="agent-card"><h3>Local Search Queries (${{ls.length}})</h3>`;
       h += `<ul class="query-list">`;
       for (let i = 0; i < ls.length; i++) {{
         h += `<li><span class="query-num">${{i+1}}.</span> ${{esc(ls[i].query)}}</li>`;
       }}
-      h += `</ul></details>`;
+      h += `</ul></div>`;
     }}
 
     h += `</div>`; // end panel-privacy

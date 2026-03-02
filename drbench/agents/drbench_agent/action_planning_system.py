@@ -352,6 +352,10 @@ class ActionPlan:
 def _get_action_plan_guidelines(available_tool_names):
     """Generate action plan guidelines based on available tools"""
 
+    cfg = get_run_config()
+    if cfg.report_style == "concise_qa":
+        return _get_qa_action_plan_guidelines(available_tool_names)
+
     # Build priority sources dynamically
     priority_sources = []
     start_instructions = []
@@ -437,7 +441,7 @@ def _get_action_plan_guidelines(available_tool_names):
        - Search for industry trends, best practices, external validation
        - Priority should be 0.5-0.7 for these actions
 
-    3. **COMPLEMENT STRATEGY**: 
+    3. **COMPLEMENT STRATEGY**:
        - Internal sources provide proprietary insights and current state
        - External sources provide industry context and validation
        - Both are needed for comprehensive analysis
@@ -469,6 +473,73 @@ def _get_action_plan_guidelines(available_tool_names):
 
     Just return valid JSON, no other text.
     """  # noqa: E501
+
+
+def _get_qa_action_plan_guidelines(available_tool_names):
+    """QA-mode action plan guidelines: no source hierarchy, equal priority for local and web."""
+
+    has_local_docs = any("LocalFileSearchTool" in tool_name for tool_name in available_tool_names)
+    has_web = any("InternetSearchTool" in t or "BrowseCompSearchTool" in t for t in available_tool_names)
+
+    # Build tool-aware examples
+    examples = []
+    if has_local_docs:
+        examples.append("""{
+        "type": "local_document_search",
+        "description": "Search local documents for [specific query]",
+        "parameters": {"query": "specific search terms", "top_k": 10},
+        "priority": 0.8,
+        "expected_output": "Answer to question N from local documents",
+        "preferred_tool": "LocalFileSearchTool"
+    }""")
+    if has_web:
+        web_tool = "BrowseCompSearchTool" if any("BrowseCompSearchTool" in t for t in available_tool_names) else "InternetSearchTool"
+        examples.append(f"""{{
+        "type": "web_search",
+        "description": "Search web for [specific query]",
+        "parameters": {{"query": "specific search terms", "num_results": 10}},
+        "priority": 0.8,
+        "expected_output": "Answer to question N from web sources",
+        "preferred_tool": "{web_tool}"
+    }}""")
+
+    action_types = ', '.join([action_type.value for action_type in ActionType])
+
+    return f"""Generate search actions to answer each research question.
+
+    For questions needing INTERNAL data (company-specific metrics, internal reports):
+    - Use LOCAL_DOCUMENT_SEARCH with specific search terms
+    - Priority: 0.8
+
+    For questions needing EXTERNAL data (general knowledge, public facts):
+    - Use WEB_SEARCH with specific search terms
+    - Priority: 0.8
+
+    For questions where the source is unclear:
+    - Generate BOTH a local search AND a web search
+    - Priority: 0.7 each
+
+    For each action, specify:
+    1. Action type ({action_types})
+    2. Specific parameters needed
+    3. Priority (0.0 to 1.0)
+    4. Expected output description
+    5. Preferred tool (choose from available tools)
+
+    Requirements:
+    - Generate 1-2 actions per question (local search, web search, or both)
+    - Search queries should be specific and targeted
+    - Do NOT generate data_analysis or context_synthesis actions
+    - Do NOT generate URL_FETCH actions
+    - Action types should be one of: {action_types}
+
+    Return a JSON array of actions:
+    [
+    {','.join(examples)}
+    ]
+
+    Just return valid JSON, no other text.
+    """
 
 
 class ActionPlanner:
@@ -629,16 +700,15 @@ class ActionPlanner:
                     logger.warning(f"Error parsing action config. Skipping action: {e}")
                     continue
 
-            # Use LLM to detect dependencies
-            if len(actions) > 1:
+            # Use LLM to detect dependencies (skip in QA mode — actions are independent per question)
+            cfg = get_run_config()
+            if len(actions) > 1 and cfg.report_style != "concise_qa":
                 detected_deps = self._detect_action_dependencies(actions, research_focus)
 
                 # Apply the detected dependencies
                 for action in actions:
                     if action.id in detected_deps:
                         action.dependencies = detected_deps[action.id]
-                        # Uncomment the following line to debug dependencies
-                        # print(f"Action {action.id} depends on: {action.dependencies}")
 
             return actions
 
@@ -818,6 +888,84 @@ class ActionPlanner:
             else:
                 findings_json = str(new_findings)
 
+        cfg = get_run_config()
+        if cfg.report_style == "concise_qa":
+            prompt = self._build_qa_adaptive_prompt(action_plan, completed_actions, findings_json, tool_registry)
+        else:
+            prompt = self._build_report_adaptive_prompt(
+                action_plan, completed_actions, findings_json, new_findings, tool_registry
+            )
+
+
+        self._log_prompt(prompt, f"adaptive_prompt_iter{action_plan.current_iteration}.txt")
+
+        try:
+            action_configs = prompt_llm_and_parse_json(self.model, prompt)
+
+            new_actions = []
+            for i, config in enumerate(action_configs):
+                # Create more descriptive adaptive action ID
+                action_type = config.get("type", "web_search")
+                desc_snippet = config.get("description", "")[:15].replace(" ", "_").lower()
+                action_id = (
+                    f"adaptive_{action_plan.current_iteration}_{action_type}_{i}"
+                    if not desc_snippet
+                    else f"adaptive_{action_plan.current_iteration}_{action_type}_{desc_snippet}_{i}"
+                )
+                try:
+                    action = Action(
+                        id=action_id,
+                        type=_coerce_action_type(config.get("type", "web_search")),
+                        description=config.get("description", ""),
+                        parameters=config.get("parameters", {}),
+                        priority=config.get("priority", 0.5),
+                        expected_output=config.get("expected_output", ""),
+                        dependencies=config.get("dependencies", []),
+                        preferred_tool=config.get("preferred_tool"),  # Now includes preferred tool
+                    )
+                    new_actions.append(action)
+                except Exception as e:
+                    logger.warning(f"Error parsing adaptive action config. Skipping action: {e}")
+                    continue
+
+            return new_actions
+
+        except Exception as e:
+            logger.warning(f"Adaptive action generation failed (continuing with existing actions): {e}")
+            return []
+
+    def _build_qa_adaptive_prompt(self, action_plan, completed_actions, findings_json, tool_registry):
+        """Build a simple adaptive prompt for QA mode with lightweight source awareness."""
+        available_tool_names = [tool.__class__.__name__ for tool in tool_registry.tools]
+
+        # Lightweight action-type summary instead of full source composition analysis
+        type_counts = {}
+        for a in completed_actions:
+            t = a.type.value
+            type_counts[t] = type_counts.get(t, 0) + 1
+        action_type_summary = ", ".join(f"{v} {k}" for k, v in type_counts.items()) or "none"
+
+        return f"""You are answering numbered research questions. Here is what we've found so far:
+
+Original Questions: {action_plan.research_query}
+Completed Actions: {len(completed_actions)} ({action_type_summary})
+Available Tools: {available_tool_names}
+Latest Findings: {findings_json}
+
+Which questions still lack clear answers? Suggest 1-3 targeted follow-up searches.
+- Try different search terms for unanswered questions
+- If local search didn't find it, try web search (and vice versa)
+- Do NOT repeat previous search queries
+- Action types should be one of: {', '.join([at.value for at in ActionType])}
+
+Return a JSON array of 0-3 new actions, or [] if all questions are adequately answered.
+Each action: {{"type": "...", "description": "...", "parameters": {{}}, "priority": 0.8, "expected_output": "...", "preferred_tool": "..."}}
+
+Just return valid JSON, no other text.
+"""
+
+    def _build_report_adaptive_prompt(self, action_plan, completed_actions, findings_json, new_findings, tool_registry):
+        """Build the full adaptive prompt for report mode with source complementarity."""
         # Analyze findings to understand source composition
         internal_findings = self._analyze_source_composition(new_findings)
 
@@ -825,7 +973,7 @@ class ActionPlanner:
         tool_guidelines = self._generate_tool_guidelines(tool_registry)
         available_tool_names = [tool.__class__.__name__ for tool in tool_registry.tools]
 
-        prompt = f"""
+        return f"""
 Based on the research progress so far, suggest new actions with INTELLIGENT SOURCE COMPLEMENTARITY:
 
 Original Research Query: {action_plan.research_query}
@@ -842,7 +990,7 @@ Current Action Plan Status:
 
 SOURCE ANALYSIS:
 - Internal/Enterprise Sources Found: {internal_findings['has_internal']}
-- External Sources Found: {internal_findings['has_external']}  
+- External Sources Found: {internal_findings['has_external']}
 - Enterprise Chat/Files: {internal_findings['has_enterprise']}
 - Key Internal Insights: {internal_findings['internal_insights']}
 
@@ -854,7 +1002,7 @@ If we have STRONG INTERNAL FINDINGS:
 - Look for case studies and best practices from similar organizations
 
 If we have LIMITED INTERNAL FINDINGS:
-- Intensify internal search with different keywords (priority 0.8-0.9)  
+- Intensify internal search with different keywords (priority 0.8-0.9)
 - Try alternative enterprise tools and search approaches
 - Search for internal documentation using related terminology
 
@@ -864,10 +1012,10 @@ If we have MIXED FINDINGS:
 - Deep-dive into promising leads with targeted searches
 
 Suggest 0-5 new actions that would:
-1. COMPLEMENT existing source types (internal findings → external validation, limited internal → more internal search)
+1. COMPLEMENT existing source types (internal findings -> external validation, limited internal -> more internal search)
 2. Follow up on promising leads from the findings
 3. Fill gaps in the research methodology
-4. Explore new angles discovered in the findings  
+4. Explore new angles discovered in the findings
 5. Download or fetch specific resources mentioned
 6. Use available tools effectively based on source gaps
 7. Avoid repeating previous actions
@@ -905,43 +1053,6 @@ Return a JSON array of new actions:
 
 Create valid JSON only, no other text.
 """
-
-        self._log_prompt(prompt, f"adaptive_prompt_iter{action_plan.current_iteration}.txt")
-
-        try:
-            action_configs = prompt_llm_and_parse_json(self.model, prompt)
-
-            new_actions = []
-            for i, config in enumerate(action_configs):
-                # Create more descriptive adaptive action ID
-                action_type = config.get("type", "web_search")
-                desc_snippet = config.get("description", "")[:15].replace(" ", "_").lower()
-                action_id = (
-                    f"adaptive_{action_plan.current_iteration}_{action_type}_{i}"
-                    if not desc_snippet
-                    else f"adaptive_{action_plan.current_iteration}_{action_type}_{desc_snippet}_{i}"
-                )
-                try:
-                    action = Action(
-                        id=action_id,
-                        type=_coerce_action_type(config.get("type", "web_search")),
-                        description=config.get("description", ""),
-                        parameters=config.get("parameters", {}),
-                        priority=config.get("priority", 0.5),
-                        expected_output=config.get("expected_output", ""),
-                        dependencies=config.get("dependencies", []),
-                        preferred_tool=config.get("preferred_tool"),  # Now includes preferred tool
-                    )
-                    new_actions.append(action)
-                except Exception as e:
-                    logger.warning(f"Error parsing adaptive action config. Skipping action: {e}")
-                    continue
-
-            return new_actions
-
-        except Exception as e:
-            logger.error(f"Error generating adaptive actions: {e}")
-            raise
 
     def _deduplicate_actions(self, new_actions: List[Action], existing_actions: List[Action]) -> List[Action]:
         """Remove duplicate or highly similar actions"""

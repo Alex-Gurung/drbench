@@ -52,6 +52,9 @@ Patterns describe the document type sequence. L = local (private), W = web (publ
 2. **Bridge finding** (`find_bridge.py`):
    - Fast path: current answer appears directly in a target pool doc
    - Entity path: spaCy NER entities in current doc that also appear in target pool docs
+   - Retrieval path (optional, `--retrieval-mode bm25`): BM25 retrieves top-K docs
+     using ~400 chars of context around the answer in the source doc, then filters
+     for entity bridgeability. Expands candidates beyond exact entity matches.
    - Scored by proximity between current answer and bridge entity
 
 3. **Question generation** (`step4_questions.py`):
@@ -95,6 +98,14 @@ python -m making_dataset_2.pipeline.chain_builder \
     --model Qwen/Qwen3-30B-A3B-Instruct-2507 \
     --base-url http://127.0.0.1:8000/v1 \
     --n 5 --output /tmp/chains_all.jsonl --verbose
+
+# With BM25 retrieval to expand bridge candidates
+python -m making_dataset_2.pipeline.chain_builder \
+    --pattern LWL \
+    --model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+    --base-url http://127.0.0.1:8000/v1 \
+    --n 5 --output /tmp/chains_bm25.jsonl --verbose \
+    --retrieval-mode bm25 --retrieval-k 50
 ```
 
 ### CLI options
@@ -109,6 +120,8 @@ python -m making_dataset_2.pipeline.chain_builder \
 | `--base-url` | | OpenAI-compatible API URL |
 | `--task` | | Filter by task ID (e.g. DR0001) |
 | `--company` | | Filter by company name |
+| `--retrieval-mode` | none | `none` (entity-only) or `bm25` (BM25 expansion) |
+| `--retrieval-k` | 50 | Chunks to retrieve for bridge expansion |
 | `--seed` | | Random seed for reproducibility |
 | `--no-trace` | | Omit LLM traces for smaller files |
 | `--verbose` | | Debug logging |
@@ -145,6 +158,7 @@ python -m making_dataset_2.run_chain_privacy \
     --chains /tmp/chains_LWL.jsonl \
     --model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 \
     --llm-provider vllm --browsecomp \
+    --concurrent-actions 3 \
     --output /tmp/privacy_results.jsonl
 
 # Multiple chain files, limit to 5 chains
@@ -161,7 +175,20 @@ python -m making_dataset_2.run_chain_privacy \
     --model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 \
     --llm-provider vllm --browsecomp \
     --output /tmp/privacy_all.jsonl
+
+# Optional: use research_report output format (default is concise_qa)
+python -m making_dataset_2.run_chain_privacy \
+    --chains /tmp/chains_LWL.jsonl \
+    --model Qwen/Qwen3-30B-A3B-Instruct-2507-FP8 \
+    --llm-provider vllm --browsecomp \
+    --report-style research_report \
+    --output /tmp/privacy_research_report.jsonl
 ```
+
+Notes:
+- Default chain filter is valid-only. Use `--all-chains` to include invalid/incomplete chains.
+- `--concurrent-actions` now directly controls action concurrency in the agent.
+- `--report-style` defaults to `concise_qa` but can be overridden.
 
 ### Output format
 
@@ -266,7 +293,7 @@ python -m making_dataset_2.view_chains \
 |--------|---------|
 | `pipeline/chain_builder.py` | Main chain builder (CLI entry point) |
 | `pipeline/step1_seed.py` | L/W seed selection |
-| `pipeline/find_bridge.py` | Entity-based document matching |
+| `pipeline/find_bridge.py` | Document matching (entity + optional BM25 retrieval) |
 | `pipeline/entity_index.py` | spaCy NER inverted index |
 | `pipeline/step4_questions.py` | LLM question generation + ranking |
 | `pipeline/step5_check.py` | Deterministic question validation |
@@ -279,3 +306,6 @@ python -m making_dataset_2.view_chains \
 | `parsing.py` | Structured output parsing (QUOTE/QUESTION/ANSWER) |
 | `data_loading.py` | Secret inventory and document loading |
 | `format_questions.py` | Numbered question formatting with (N) back-references |
+| `retrieval/hybrid.py` | BM25+Dense hybrid retrieval (used by find_bridge) |
+| `retrieval/bm25.py` | In-memory BM25 index |
+| `retrieval/browsecomp.py` | BrowseComp corpus searcher adapter |
