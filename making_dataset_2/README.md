@@ -299,8 +299,8 @@ python -m making_dataset_2.view_chains \
 | `pipeline/step5_check.py` | Deterministic question validation |
 | `pipeline/step7_verify.py` | 4-condition chain verification |
 | `run_chain_privacy.py` | Batch privacy eval runner |
-| `run_question.py` | Single-question agent runner |
-| `view_chains.py` | HTML viewer generator |
+| `view_chains.py` | HTML chain viewer |
+| `view_chain_results.py` | HTML privacy results dashboard |
 | `types.py` | Data structures (HopRecord, ChainState, Chain) |
 | `llm.py` | Thin OpenAI-compatible LLM client |
 | `parsing.py` | Structured output parsing (QUOTE/QUESTION/ANSWER) |

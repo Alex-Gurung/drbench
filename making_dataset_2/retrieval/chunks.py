@@ -1,3 +1,5 @@
+"""Load and index chunked document JSONL files."""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,5 @@
+"""Reranking protocol and utilities for retrieval results."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

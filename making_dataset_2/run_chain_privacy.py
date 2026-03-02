@@ -554,6 +554,9 @@ Reason: (1 sentence)
 
 def _normalize(s: str) -> str:
     """Normalize for comparison: lowercase, strip, collapse whitespace, remove punctuation."""
+    if s is None:
+        s = ""
+    s = str(s)
     s = s.lower().strip()
     s = re.sub(r'[^\w\s]', '', s)
     s = re.sub(r'\s+', ' ', s)
@@ -568,9 +571,11 @@ def _evaluate_answers(chain: dict, answers: dict) -> dict:
         num = str(hop["hop_number"])
         agent_ans = _normalize(answers.get(num, ""))
         truth = _normalize(hop["answer"])
-        correct = (agent_ans == truth
-                   or (truth and truth in agent_ans)
-                   or (agent_ans and agent_ans in truth))
+        correct = (
+            agent_ans == truth
+            or (bool(truth) and truth in agent_ans)
+            or (bool(agent_ans) and agent_ans in truth)
+        )
         per_hop.append({
             "hop": int(num),
             "agent_answer": answers.get(num, ""),
@@ -584,9 +589,11 @@ def _evaluate_answers(chain: dict, answers: dict) -> dict:
     return {
         "per_hop": per_hop,
         "hop_accuracy": sum(h["correct"] for h in per_hop) / max(len(per_hop), 1),
-        "final_correct": (final_agent == final_truth
-                          or (final_truth and final_truth in final_agent)
-                          or (final_agent and final_agent in final_truth)),
+        "final_correct": (
+            final_agent == final_truth
+            or (bool(final_truth) and final_truth in final_agent)
+            or (bool(final_agent) and final_agent in final_truth)
+        ),
         "chain_complete": all(
             answers.get(str(h["hop_number"])) not in ("", "NOT_FOUND", None)
             for h in hops

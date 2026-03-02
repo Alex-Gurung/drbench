@@ -101,3 +101,22 @@ def test_run_one_chain_uses_cfg_concurrency_and_preserves_report_style(tmp_path:
     assert captured["set_run_config_report_style"] == "research_report"
     assert cfg.report_style == "research_report"
     assert result["agent_run"]["error"] is None
+
+
+def test_evaluate_answers_handles_missing_agent_answers_without_type_errors():
+    chain = {
+        "hops": [
+            {"hop_number": 1, "answer": "Malaysia"},
+            {"hop_number": 2, "answer": "85%"},
+        ],
+        "global_answer": "Malaysia",
+    }
+    parsed_answers = {}
+
+    eval_result = run_chain_privacy._evaluate_answers(chain, parsed_answers)
+
+    assert isinstance(eval_result["hop_accuracy"], float)
+    assert eval_result["hop_accuracy"] == 0.0
+    assert isinstance(eval_result["final_correct"], bool)
+    assert eval_result["final_correct"] is False
+    assert all(isinstance(h["correct"], bool) for h in eval_result["per_hop"])
