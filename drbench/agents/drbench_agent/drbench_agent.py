@@ -55,10 +55,12 @@ class DrBenchAgent(BaseAgent):
         local_file_extensions: Optional[List[str]] = None,
         concurrent_actions: int = 1,
         verbose: bool = False,
+        shared_browsecomp=None,
         **kwargs,
     ):
         # Set values from arguments
         cfg = get_run_config()
+        self._shared_browsecomp = shared_browsecomp
         self.model = model or cfg.model
         self.workspace_dir = workspace_dir
         self.max_iterations = max_iterations
@@ -112,14 +114,20 @@ class DrBenchAgent(BaseAgent):
 
         # Web search tool: BrowseComp (offline) or InternetSearch (live)
         if cfg.browsecomp_enabled:
-            # Use offline BrowseComp corpus search instead of live web
             from .agent_tools.browsecomp_search_tool import BrowseCompSearchTool
             logger.info("Using BrowseComp-Plus offline search (replaces InternetSearchTool)")
-            tools.append(BrowseCompSearchTool(
-                config=cfg,
-                vector_store=self.vector_store,
-                device="cpu",  # CPU to avoid vLLM GPU memory conflicts
-            ))
+            if self._shared_browsecomp is not None:
+                # Shallow copy: shares FAISS/BM25/model, gets own vector_store
+                tool = BrowseCompSearchTool.__new__(BrowseCompSearchTool)
+                tool.__dict__.update(self._shared_browsecomp.__dict__)
+                tool.vector_store = self.vector_store
+                tools.append(tool)
+            else:
+                tools.append(BrowseCompSearchTool(
+                    config=cfg,
+                    vector_store=self.vector_store,
+                    device="cpu",
+                ))
         elif not cfg.no_web and config.SERPER_API_KEY:
             # Use live Serper web search
             tools.append(InternetSearchTool(

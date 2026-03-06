@@ -110,9 +110,14 @@ def select_web_seed(
     """
     rng = rng or random.Random()
 
-    # Collect bridgeable (web_doc_id, entity) pairs
+    # Collect bridgeable (web_doc_id, entity) pairs.
+    # Sample web docs to avoid running NER on all 100K+ docs upfront.
+    _MAX_WEB_SAMPLE = 200
+    web_list = list(web_doc_ids)
+    rng.shuffle(web_list)
+
     candidates: list[tuple[str, str]] = []
-    for web_id in web_doc_ids:
+    for web_id in web_list[:_MAX_WEB_SAMPLE]:
         entities = entity_index.entities_in_doc(web_id)
         for ent in entities:
             if not is_entity(ent):
@@ -121,7 +126,7 @@ def select_web_seed(
                 candidates.append((web_id, ent))
 
     if not candidates:
-        raise ValueError("No web docs with bridgeable entities found.")
+        raise ValueError(f"No bridgeable web docs in sample of {min(_MAX_WEB_SAMPLE, len(web_list))}.")
 
     rng.shuffle(candidates)
     logger.info("Web seed: %d bridgeable (doc, entity) candidates", len(candidates))

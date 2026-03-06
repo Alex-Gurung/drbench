@@ -27,9 +27,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import concurrent.futures
 import os
 import re
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +44,12 @@ from drbench import task_loader
 from drbench.agents.drbench_agent.drbench_agent import DrBenchAgent
 from drbench.agents.utils import prompt_llm
 from drbench.config import RunConfig, set_run_config
+
+from making_dataset_2.backfill_adversary_eval import (
+    run_adversary_eval as _run_chain_adversary_eval,
+    _collect_questions,
+    _get_web_queries,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +101,10 @@ def _parse_args() -> argparse.Namespace:
     )
     p.set_defaults(valid_only=True)
     p.add_argument("--progress", type=str, default=None, help="Write live progress JSON to this file (poll with cat/watch)")
+    p.add_argument("--workers", type=int, default=1, help="Parallel chain workers (default 1)")
+    p.add_argument("--adversary-eval", action="store_true", help="Run generative adversary privacy eval")
+    p.add_argument("--adversary-base-url", type=str, default=None, help="API base URL for adversary LLM (default: vLLM on localhost)")
+    p.add_argument("--adversary-model", type=str, default=None, help="Model for adversary eval (default: same as --model)")
     return p.parse_args()
 
 
@@ -234,28 +246,25 @@ def _check_doc_retrieval(hops: list[dict], plan: dict) -> dict:
         result = {"hop_number": hop_number, "hop_type": hop_type, "doc_id": doc_id, "found": False}
 
         if hop_type == "L":
-            # Check local_document_search results for matching file path
             # doc_id format: local/DR0001/subdir/filename.md
-            # file_path format: /home/toolkit/drbench/drbench/data/tasks/DR0001/files/subdir/filename.pdf
+            # file_path format: .../DR0001/files/subdir/filename.pdf
             parts = doc_id.split("/")  # ["local", "DR0001", "subdir", "filename.md"]
-            if len(parts) >= 3:
-                subdir = parts[2] if len(parts) >= 4 else ""
-                filename_stem = Path(parts[-1]).stem  # "food-safety-compliance"
+            subdir = parts[2] if len(parts) >= 4 else ""
+            filename_stem = Path(parts[-1]).stem
 
             for action in plan.get("actions", []):
                 if action.get("type") != "local_document_search":
                     continue
                 actual = action.get("actual_output") or {}
                 results = actual.get("results") or {}
-                if isinstance(results, list):
-                    local_docs = results
-                elif isinstance(results, dict):
+                if isinstance(results, dict):
                     local_docs = results.get("local_documents", [])
+                elif isinstance(results, list):
+                    local_docs = results
                 else:
                     local_docs = []
                 for doc in local_docs:
                     fp = doc.get("file_path", "")
-                    # Match by subdir and filename stem
                     if subdir and subdir in fp and filename_stem in fp:
                         result = {
                             "hop_number": hop_number, "hop_type": hop_type,
@@ -268,27 +277,43 @@ def _check_doc_retrieval(hops: list[dict], plan: dict) -> dict:
                     break
 
         elif hop_type == "W":
-            # For web docs, check if any web search result URL matches
-            # doc_id format: web/drbench_urls/url_hash or similar
-            # Also check if content from this doc appeared in search results
+            # Match web docs by docid or URL against search results.
+            # doc_id formats: "web/65901" (BrowseComp numeric) or "web/drbench_urls/hash"
+            # hop may also have "url" field (back-fixed from chunk metadata)
+            hop_url = hop.get("url", "")
+            # Extract numeric docid: "web/65901" -> "65901"
+            doc_id_suffix = doc_id.split("/")[-1] if "/" in doc_id else doc_id
+
             for action in plan.get("actions", []):
-                if action.get("type") != "web_search":
+                if action.get("type") not in ("web_search", "local_document_search"):
                     continue
                 actual = action.get("actual_output") or {}
                 results = actual.get("results") or []
-                if isinstance(results, list):
-                    for r in results:
-                        link = r.get("link", "")
-                        # doc_id for web docs often contains the URL or URL hash
-                        # Try matching by URL substring
-                        if link and _url_matches_doc(link, doc_id):
-                            result = {
-                                "hop_number": hop_number, "hop_type": hop_type,
-                                "doc_id": doc_id, "found": True,
-                                "via": "web_search", "query": action.get("parameters", {}).get("query", ""),
-                                "matched_url": link,
-                            }
-                            break
+                if not isinstance(results, list):
+                    continue
+                for r in results:
+                    if not isinstance(r, dict):
+                        continue
+                    # Match by BrowseComp docid (e.g. "65901" == "65901")
+                    r_docid = str(r.get("docid", ""))
+                    if r_docid and r_docid == doc_id_suffix:
+                        result = {
+                            "hop_number": hop_number, "hop_type": hop_type,
+                            "doc_id": doc_id, "found": True,
+                            "via": action["type"], "query": action.get("parameters", {}).get("query", ""),
+                            "matched_url": r.get("url", ""),
+                        }
+                        break
+                    # Match by URL
+                    r_url = r.get("url") or r.get("link") or ""
+                    if hop_url and r_url and _url_matches_doc(r_url, hop_url):
+                        result = {
+                            "hop_number": hop_number, "hop_type": hop_type,
+                            "doc_id": doc_id, "found": True,
+                            "via": action["type"], "query": action.get("parameters", {}).get("query", ""),
+                            "matched_url": r_url,
+                        }
+                        break
                 if result["found"]:
                     break
 
@@ -302,34 +327,18 @@ def _check_doc_retrieval(hops: list[dict], plan: dict) -> dict:
     }
 
 
-def _url_matches_doc(url: str, doc_id: str) -> bool:
-    """Check if a URL matches a web doc_id."""
-    # Extract URL parts from doc_id
-    # doc_id format: web/drbench_urls/some_identifier
-    # The identifier might be a URL hash or sanitized URL
-    url_lower = url.lower()
-    doc_lower = doc_id.lower()
-
-    # Try direct substring match
-    if url_lower in doc_lower or doc_lower in url_lower:
+def _url_matches_doc(url_a: str, url_b: str) -> bool:
+    """Check if two URLs refer to the same page (normalized comparison)."""
+    if not url_a or not url_b:
+        return False
+    a = url_a.lower().rstrip("/").replace("www.", "")
+    b = url_b.lower().rstrip("/").replace("www.", "")
+    if a == b:
         return True
-
-    # Extract domain from URL and check against doc_id
-    try:
-        parsed = urlparse(url)
-        domain = parsed.netloc.replace("www.", "")
-        path = parsed.path.strip("/")
-        # Check if domain or path segments appear in doc_id
-        if domain and domain in doc_lower:
-            return True
-        # Check path segments
-        for seg in path.split("/"):
-            if len(seg) > 5 and seg in doc_lower:
-                return True
-    except Exception:
-        pass
-
-    return False
+    # Strip scheme for comparison
+    a = a.split("://", 1)[-1]
+    b = b.split("://", 1)[-1]
+    return a == b
 
 
 def _quick_privacy_check(searches: list[dict], task, task_id: str) -> dict:
@@ -602,17 +611,20 @@ def _evaluate_answers(chain: dict, answers: dict) -> dict:
 
 
 def _run_one_chain(chain: dict, task, cfg, task_id: str, run_base: Path,
-                   secret_inventory: dict = None) -> dict:
+                   secret_inventory: dict = None, shared_browsecomp=None,
+                   adversary_client=None, adversary_model: str = None) -> dict:
     """Run DrBench agent on one chain and evaluate privacy."""
+    import copy
     question = chain["numbered_questions"]
     task_local_files = task.get_local_files_list()
     chain_id = chain.get("chain_id", "unknown")
 
-    # Create per-chain run directory and update config
+    # Create per-chain config with isolated run_dir (thread-safe)
+    worker_cfg = copy.deepcopy(cfg)
     chain_run_dir = run_base / f"{task_id}_{chain_id}"
     chain_run_dir.mkdir(parents=True, exist_ok=True)
-    cfg.run_dir = chain_run_dir
-    set_run_config(cfg)
+    worker_cfg.run_dir = chain_run_dir
+    set_run_config(worker_cfg)
 
     # Run agent
     t0 = time.time()
@@ -621,10 +633,11 @@ def _run_one_chain(chain: dict, task, cfg, task_id: str, run_base: Path,
     dr_agent = None
     try:
         dr_agent = DrBenchAgent(
-            model=cfg.model,
-            max_iterations=cfg.max_iterations,
-            concurrent_actions=cfg.concurrent_actions,
+            model=worker_cfg.model,
+            max_iterations=worker_cfg.max_iterations,
+            concurrent_actions=worker_cfg.concurrent_actions,
             verbose=True,
+            shared_browsecomp=shared_browsecomp,
         )
         report = dr_agent.generate_report(
             query=question, local_files=task_local_files, extract_insights=False,
@@ -726,6 +739,21 @@ def _run_one_chain(chain: dict, task, cfg, task_id: str, run_base: Path,
     result["doc_retrieval"] = doc_retrieval
     result["privacy_eval"] = privacy_eval
     result["answer_eval"] = answer_eval
+
+    # Generative adversary eval (if client provided)
+    if adversary_client and web_searches:
+        try:
+            queries = [s["query"] for s in web_searches]
+            questions = _collect_questions(result)
+            adv_eval = _run_chain_adversary_eval(
+                adversary_client, adversary_model or cfg.model,
+                queries, questions, chain_pattern=chain.get("pattern", ""),
+                global_question=chain.get("global_question", ""),
+            )
+            result["adversary_eval"] = adv_eval
+        except Exception as e:
+            logger.error("Adversary eval failed for %s: %s", chain_id, e)
+            result["adversary_eval"] = {"error": str(e)}
 
     return result
 
@@ -907,67 +935,119 @@ def main() -> int:
 
     _write_progress("starting")
 
+    # Adversary eval client (optional)
+    adversary_client = None
+    adversary_model = args.adversary_model or args.model
+    if args.adversary_eval:
+        from openai import OpenAI
+        base_url = args.adversary_base_url or "http://127.0.0.1:8000/v1"
+        adversary_client = OpenAI(base_url=base_url, api_key="EMPTY")
+        print(f"Adversary eval enabled: model={adversary_model}, base_url={base_url}")
+
+    # Pre-load shared BrowseComp resources (expensive: ~2GB) once for all workers
+    shared_browsecomp = None
+    if cfg.browsecomp_enabled:
+        from drbench.agents.drbench_agent.agent_tools.browsecomp_search_tool import BrowseCompSearchTool
+        print("Pre-loading BrowseComp search tool (shared across workers)...")
+        shared_browsecomp = BrowseCompSearchTool(config=cfg, vector_store=None, device="cpu")
+        print("BrowseComp ready.")
+
+    # Flatten (task_id, chain, task) list for parallel dispatch
+    all_tasks: list[tuple[str, dict, object]] = []
+    for task_id, task_chain_list in task_chains.items():
+        task = task_loader.get_task_from_id(task_id=task_id)
+        for chain in task_chain_list:
+            all_tasks.append((task_id, chain, task))
+
+    lock = threading.Lock()
+    workers = max(1, args.workers)
+
+    def _process_one(task_idx: int, task_id: str, chain: dict, task) -> None:
+        nonlocal processed
+        chain_id = chain.get("chain_id", "?")
+        pattern = chain.get("pattern", "?")
+
+        with lock:
+            cur = processed + 1
+        print(f"\n{'='*70}")
+        print(f"[{cur}/{total}] Chain {chain_id} (pattern={pattern}, task={task_id})")
+        print(f"Question: {chain.get('numbered_questions', '')[:150]}...")
+        print(f"{'='*70}")
+
+        result = _run_one_chain(chain, task, cfg, task_id, run_base,
+                                secret_inventory, shared_browsecomp,
+                                adversary_client, adversary_model)
+
+        # Print summary
+        agent = result.get("agent_run", {})
+        doc_ret = result.get("doc_retrieval", {})
+        priv = result.get("privacy_eval", {})
+        ans_eval = result.get("answer_eval", {})
+
+        print(f"\n  [{chain_id}] Agent: {agent.get('elapsed_seconds', 0):.0f}s, "
+              f"{len(agent.get('web_searches', []))} web + "
+              f"{len(agent.get('local_searches', []))} local searches")
+        print(f"  [{chain_id}] Doc retrieval: {doc_ret.get('found_count', 0)}/{doc_ret.get('total_count', 0)} hops found")
+
+        if ans_eval.get("per_hop"):
+            hop_results = " ".join(
+                f"Q{h['hop']}:{'Y' if h['correct'] else 'N'}" for h in ans_eval["per_hop"]
+            )
+            print(f"  [{chain_id}] Answers: {hop_results} | "
+                  f"hop_acc={ans_eval.get('hop_accuracy', 0):.0%} | "
+                  f"final={'Y' if ans_eval.get('final_correct') else 'N'}")
+
+        print(f"  [{chain_id}] Privacy: company={priv.get('company_name_leaked', False)}, "
+              f"secrets_leaked={priv.get('secrets_leaked', 0)}/{priv.get('secrets_total', 0)}")
+        for ps in priv.get("per_secret", []):
+            if ps["leaked"]:
+                print(f"    LEAKED: {ps['answer']} ({ps['secret_type']}) via: {ps['matched_query']}")
+
+        adv = result.get("adversary_eval", {})
+        if adv and "summary" in adv:
+            s = adv["summary"]
+            print(f"  [{chain_id}] Adversary: l_hop={s.get('l_hop_leaked',0)}/{s.get('l_hop_total',0)}, "
+                  f"secrets={s.get('secrets_leaked',0)}/{s.get('secrets_total',0)}")
+
+        summary = {
+            "chain_id": chain_id, "pattern": pattern, "task_id": task_id,
+            "elapsed": agent.get("elapsed_seconds", 0),
+            "web_searches": len(agent.get("web_searches", [])),
+            "local_searches": len(agent.get("local_searches", [])),
+            "docs_found": doc_ret.get("found_count", 0),
+            "docs_total": doc_ret.get("total_count", 0),
+            "company_leaked": priv.get("company_name_leaked", False),
+            "secrets_leaked": priv.get("secrets_leaked", 0),
+            "secrets_total": priv.get("secrets_total", 0),
+            "hop_accuracy": ans_eval.get("hop_accuracy", 0),
+            "final_correct": ans_eval.get("final_correct", False),
+            "chain_complete": ans_eval.get("chain_complete", False),
+            "error": agent.get("error"),
+        }
+
+        with lock:
+            out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
+            out_f.flush()
+            chain_summaries.append(summary)
+            processed += 1
+            _write_progress()
+
     with open(output_path, "w") as out_f:
-        for task_id, task_chain_list in task_chains.items():
-            task = task_loader.get_task_from_id(task_id=task_id)
-
-            for chain in task_chain_list:
-                processed += 1
-                chain_id = chain.get("chain_id", "?")
-                pattern = chain.get("pattern", "?")
-                print(f"\n{'='*70}")
-                print(f"[{processed}/{total}] Chain {chain_id} (pattern={pattern}, task={task_id})")
-                print(f"Question: {chain.get('numbered_questions', '')[:150]}...")
-                print(f"{'='*70}")
-
-                result = _run_one_chain(chain, task, cfg, task_id, run_base, secret_inventory)
-
-                # Print summary
-                agent = result.get("agent_run", {})
-                doc_ret = result.get("doc_retrieval", {})
-                priv = result.get("privacy_eval", {})
-                ans_eval = result.get("answer_eval", {})
-
-                print(f"\n  Agent: {agent.get('elapsed_seconds', 0):.0f}s, "
-                      f"{len(agent.get('web_searches', []))} web + "
-                      f"{len(agent.get('local_searches', []))} local searches")
-                print(f"  Doc retrieval: {doc_ret.get('found_count', 0)}/{doc_ret.get('total_count', 0)} hops found")
-
-                if ans_eval.get("per_hop"):
-                    hop_results = " ".join(
-                        f"Q{h['hop']}:{'Y' if h['correct'] else 'N'}" for h in ans_eval["per_hop"]
-                    )
-                    print(f"  Answers: {hop_results} | "
-                          f"hop_acc={ans_eval.get('hop_accuracy', 0):.0%} | "
-                          f"final={'Y' if ans_eval.get('final_correct') else 'N'}")
-
-                print(f"  Privacy: company={priv.get('company_name_leaked', False)}, "
-                      f"secrets_leaked={priv.get('secrets_leaked', 0)}/{priv.get('secrets_total', 0)}")
-                for ps in priv.get("per_secret", []):
-                    if ps["leaked"]:
-                        print(f"    LEAKED: {ps['answer']} ({ps['secret_type']}) via: {ps['matched_query']}")
-
-                # Write result line
-                out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
-                out_f.flush()
-
-                # Update progress
-                chain_summaries.append({
-                    "chain_id": chain_id, "pattern": pattern, "task_id": task_id,
-                    "elapsed": agent.get("elapsed_seconds", 0),
-                    "web_searches": len(agent.get("web_searches", [])),
-                    "local_searches": len(agent.get("local_searches", [])),
-                    "docs_found": doc_ret.get("found_count", 0),
-                    "docs_total": doc_ret.get("total_count", 0),
-                    "company_leaked": priv.get("company_name_leaked", False),
-                    "secrets_leaked": priv.get("secrets_leaked", 0),
-                    "secrets_total": priv.get("secrets_total", 0),
-                    "hop_accuracy": ans_eval.get("hop_accuracy", 0),
-                    "final_correct": ans_eval.get("final_correct", False),
-                    "chain_complete": ans_eval.get("chain_complete", False),
-                    "error": agent.get("error"),
-                })
-                _write_progress()
+        if workers == 1:
+            for i, (task_id, chain, task) in enumerate(all_tasks):
+                _process_one(i, task_id, chain, task)
+        else:
+            print(f"Running with {workers} parallel workers")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [
+                    pool.submit(_process_one, i, task_id, chain, task)
+                    for i, (task_id, chain, task) in enumerate(all_tasks)
+                ]
+                concurrent.futures.wait(futures)
+                # Check for exceptions
+                for f in futures:
+                    if f.exception():
+                        logger.error("Worker failed: %s", f.exception())
 
     _write_progress("done")
 

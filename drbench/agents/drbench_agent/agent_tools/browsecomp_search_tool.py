@@ -2,7 +2,7 @@
 BrowseComp-Plus search tool for DrBench.
 
 Provides offline web search using a fixed FAISS-indexed corpus (BrowseComp-Plus).
-Uses dense retrieval with Qwen3-Embedding models for query encoding.
+Uses BM25 broad recall + dense re-ranking for hybrid retrieval.
 
 The embedding model runs on CPU by default to avoid GPU memory conflicts with vLLM.
 """
@@ -10,8 +10,13 @@ The embedding model runs on CPU by default to avoid GPU memory conflicts with vL
 from __future__ import annotations
 
 import glob
+import heapq
 import logging
+import math
 import pickle
+import re as re_mod
+import threading
+from collections import Counter, defaultdict
 from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +33,56 @@ from tevatron.retriever.modeling.dense import DenseModel
 from .base import ResearchContext, Tool
 from drbench.internet_search_logging import log_internet_search
 from drbench.config import RunConfig, get_run_config
+
+
+# ---------------------------------------------------------------------------
+# Inline BM25 (zero external deps, ~40 lines)
+# ---------------------------------------------------------------------------
+_TOKEN_RE = re_mod.compile(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?")
+
+
+def _bm25_tokenize(text: str) -> list[str]:
+    return [t.lower() for t in _TOKEN_RE.findall(text) if len(t) >= 2]
+
+
+class _BM25Index:
+    """Minimal BM25 for BrowseComp recall stage."""
+
+    def __init__(self, docs: list[str], *, k1: float = 1.5, b: float = 0.75):
+        self._k1, self._b = k1, b
+        self._N = len(docs)
+        self._doc_len: list[int] = []
+        self._df: dict[str, int] = defaultdict(int)
+        self._inv: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        total = 0
+        for idx, text in enumerate(docs):
+            tf = Counter(_bm25_tokenize(text))
+            dl = sum(tf.values())
+            self._doc_len.append(dl)
+            total += dl
+            for term, f in tf.items():
+                self._df[term] += 1
+                self._inv[term].append((idx, f))
+        self._avgdl = (total / self._N) if self._N else 0.0
+
+    def search(self, query: str, *, k: int = 200) -> list[tuple[int, float]]:
+        """Return list of (doc_idx, score) sorted by BM25 score."""
+        qtf = Counter(_bm25_tokenize(query))
+        if not qtf:
+            return []
+        scores: dict[int, float] = defaultdict(float)
+        for term in qtf:
+            df = self._df.get(term)
+            if not df:
+                continue
+            idf = math.log(1.0 + (self._N - df + 0.5) / (df + 0.5))
+            for doc_idx, f in self._inv.get(term, []):
+                dl = self._doc_len[doc_idx]
+                denom = f + self._k1 * (1.0 - self._b + self._b * (dl / (self._avgdl or 1.0)))
+                scores[doc_idx] += idf * (f * (self._k1 + 1.0) / denom)
+        if not scores:
+            return []
+        return heapq.nlargest(k, scores.items(), key=lambda kv: kv[1])
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +121,15 @@ class BrowseCompSearchTool(Tool):
         self.docid_to_url: Dict[str, str] = {}
         self.model = None
         self.tokenizer = None
+        self.bm25: Optional[_BM25Index] = None
+        # Maps BM25 internal index -> FAISS lookup index (for docid resolution)
+        self._bm25_idx_to_lookup_idx: Optional[Dict[int, int]] = None
 
         # Task prefix for query encoding
         self.task_prefix = "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:"
+
+        # Lock for thread-safe embedding model inference (shared across shallow copies)
+        self._encode_lock = threading.Lock()
 
         self._initialize()
 
@@ -82,7 +143,7 @@ class BrowseCompSearchTool(Tool):
         OUTPUTS: Search results with URLs, snippets, and relevant content that gets automatically processed and stored for synthesis."""
 
     def _initialize(self) -> None:
-        """Initialize FAISS index, embedding model, and corpus."""
+        """Initialize FAISS index, BM25 index, embedding model, and corpus."""
         logger.info("Initializing BrowseComp-Plus search tool...")
         logger.info(f"  Device: {self.device}")
         logger.info(f"  Index: {self.config.browsecomp_index_glob}")
@@ -91,6 +152,7 @@ class BrowseCompSearchTool(Tool):
         self._load_faiss_index()
         self._load_model_and_tokenizer()
         self._load_dataset()
+        self._build_bm25()
 
         logger.info("BrowseComp-Plus search tool initialized.")
 
@@ -110,6 +172,7 @@ class BrowseCompSearchTool(Tool):
         logger.info(f"Loading {len(index_files)} index shards...")
         reps0, lookup0 = pickle_load(index_files[0])
         self.searcher = FaissFlatSearcher(reps0)
+        self.searcher.add(reps0)  # FaissFlatSearcher.__init__ only sets dimension
         self.lookup = list(lookup0)
 
         for path in index_files[1:]:
@@ -164,8 +227,74 @@ class BrowseCompSearchTool(Tool):
 
         logger.info(f"Loaded {len(self.docid_to_idx)} documents from corpus.")
 
+    def _build_bm25(self) -> None:
+        """Build BM25 index over corpus texts for hybrid retrieval.
+
+        Caches the index data as plain dicts to a pickle file next to the FAISS
+        index shards so subsequent runs skip the expensive tokenization pass.
+        """
+        if not self.lookup:
+            return
+
+        index_dir = Path(glob.glob(self.config.browsecomp_index_glob)[0]).parent
+        cache_path = index_dir / "bm25_cache.pkl"
+
+        if cache_path.exists():
+            logger.info(f"Loading cached BM25 index from {cache_path}")
+            with open(cache_path, "rb") as f:
+                data = pickle.load(f)
+            # Reconstruct _BM25Index from raw fields
+            bm25 = _BM25Index.__new__(_BM25Index)
+            bm25._k1 = data["k1"]
+            bm25._b = data["b"]
+            bm25._N = data["N"]
+            bm25._doc_len = data["doc_len"]
+            bm25._avgdl = data["avgdl"]
+            bm25._df = data["df"]
+            bm25._inv = data["inv"]
+            self.bm25 = bm25
+            self._bm25_idx_to_lookup_idx = data["idx_to_lookup"]
+            logger.info(f"BM25 index loaded ({bm25._N} documents).")
+            return
+
+        # Build lookup_docid -> FAISS-lookup-index mapping
+        lookup_idx_by_docid: Dict[str, int] = {}
+        for i, docid in enumerate(self.lookup):
+            lookup_idx_by_docid[docid] = i
+
+        bm25_texts: list[str] = []
+        bm25_idx_to_lookup: Dict[int, int] = {}
+
+        for docid, ds_idx in self.docid_to_idx.items():
+            row = self.dataset[int(ds_idx)]
+            text = row.get("text") or ""
+            if not text:
+                continue
+            lookup_i = lookup_idx_by_docid.get(docid)
+            if lookup_i is None:
+                continue
+            bm25_i = len(bm25_texts)
+            bm25_texts.append(text)
+            bm25_idx_to_lookup[bm25_i] = lookup_i
+
+        logger.info(f"Building BM25 index over {len(bm25_texts)} documents...")
+        self.bm25 = _BM25Index(bm25_texts)
+        self._bm25_idx_to_lookup_idx = bm25_idx_to_lookup
+
+        # Save raw data (no class instances) so any script can load it
+        logger.info(f"Saving BM25 cache to {cache_path}")
+        data = {
+            "k1": self.bm25._k1, "b": self.bm25._b, "N": self.bm25._N,
+            "doc_len": self.bm25._doc_len, "avgdl": self.bm25._avgdl,
+            "df": dict(self.bm25._df), "inv": dict(self.bm25._inv),
+            "idx_to_lookup": bm25_idx_to_lookup,
+        }
+        with open(cache_path, "wb") as f:
+            pickle.dump(data, f)
+        logger.info("BM25 index built and cached.")
+
     def _encode_query(self, query: str) -> np.ndarray:
-        """Encode query string to embedding vector."""
+        """Encode query string to embedding vector (thread-safe)."""
         batch = self.tokenizer(
             self.task_prefix + query,
             padding=True,
@@ -181,9 +310,10 @@ class BrowseCompSearchTool(Tool):
         else:
             ctx = nullcontext()
 
-        with ctx:
-            with torch.no_grad():
-                reps = self.model.encode_query(batch)
+        with self._encode_lock:
+            with ctx:
+                with torch.no_grad():
+                    reps = self.model.encode_query(batch)
 
         return reps.cpu().numpy()
 
@@ -218,19 +348,38 @@ class BrowseCompSearchTool(Tool):
             return output
 
         try:
-            # Encode query
+            top_k = self.config.browsecomp_top_k
             q_reps = self._encode_query(query)
 
-            # Search FAISS index
-            scores, indices = self.searcher.search(q_reps, self.config.browsecomp_top_k)
-            scores = scores[0]
-            indices = indices[0]
+            # Hybrid retrieval: BM25 broad recall + dense re-ranking.
+            # Collect candidate FAISS-lookup indices from both BM25 and dense.
+            candidate_lookup_idxs: set[int] = set()
 
-            # Retrieve documents (truncate to avoid blowing up adaptive planning context)
+            # Stage 1a: BM25 recall (200 candidates)
+            if self.bm25 is not None and self._bm25_idx_to_lookup_idx is not None:
+                bm25_hits = self.bm25.search(query, k=200)
+                for bm25_idx, _score in bm25_hits:
+                    lookup_i = self._bm25_idx_to_lookup_idx.get(bm25_idx)
+                    if lookup_i is not None:
+                        candidate_lookup_idxs.add(lookup_i)
+
+            # Stage 1b: Dense recall (200 candidates)
+            dense_scores, dense_indices = self.searcher.search(q_reps, min(200, len(self.lookup)))
+            for idx in dense_indices[0]:
+                candidate_lookup_idxs.add(int(idx))
+
+            # Stage 2: Re-rank all candidates by inner product with query.
+            # Embeddings are L2-normalized, so inner product == cosine similarity.
+            candidate_list = sorted(candidate_lookup_idxs)
+            candidate_embs = np.array([self.searcher.index.reconstruct(i) for i in candidate_list])
+            scores_all = candidate_embs @ q_reps[0]
+
+            ranked = sorted(zip(candidate_list, scores_all), key=lambda x: x[1], reverse=True)
+
             max_chars = self.config.browsecomp_max_chars
             results = []
-            for score, idx in zip(scores, indices):
-                docid = self.lookup[int(idx)]
+            for lookup_idx, score in ranked[:top_k]:
+                docid = self.lookup[lookup_idx]
                 doc = self._get_doc(docid)
                 text = doc.get("text") or ""
                 if len(text) > max_chars:

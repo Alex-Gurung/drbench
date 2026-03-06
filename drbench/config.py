@@ -13,6 +13,7 @@ This separation ensures:
 """
 
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -196,29 +197,30 @@ class RunConfig:
         }
 
 
-# Global config instance
-_run_config: Optional[RunConfig] = None
+# Thread-local config — each thread gets its own RunConfig so parallel
+# workers can have different run_dir without clobbering each other.
+_thread_local = threading.local()
 
 
 def get_run_config() -> RunConfig:
-    """Get the global run config.
+    """Get the current thread's run config.
 
     Returns existing config or creates default.
     For experiments, always call set_run_config() first with CLI args.
     """
-    global _run_config
-    if _run_config is None:
-        _run_config = RunConfig()
-    return _run_config
+    cfg = getattr(_thread_local, "run_config", None)
+    if cfg is None:
+        cfg = RunConfig()
+        _thread_local.run_config = cfg
+    return cfg
 
 
 def set_run_config(config: RunConfig) -> None:
-    """Set the global run config.
+    """Set the current thread's run config.
 
     Call this at the start of a run with CLI-parsed config.
     """
-    global _run_config
-    _run_config = config
+    _thread_local.run_config = config
 
 
 # =============================================================================

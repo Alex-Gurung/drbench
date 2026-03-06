@@ -64,6 +64,36 @@ class HybridSearcher:
         if dense_index_path is not None and dense_index_path.exists():
             self.dense = DenseIndex.load_npz(dense_index_path)
 
+    @classmethod
+    def from_paths(cls, paths: list[Path], **kwargs) -> "HybridSearcher":
+        """Build a single searcher from multiple chunk JSONL files."""
+        if len(paths) == 1:
+            return cls(chunks_path=paths[0], **kwargs)
+        obj = cls.__new__(cls)
+        obj._chunk_ids = []
+        obj._doc_ids = []
+        obj._texts = []
+        obj._metas = []
+        for path in paths:
+            for rec in iter_chunks(path):
+                text = (rec.get("text") or "").strip()
+                cid = rec.get("chunk_id")
+                did = rec.get("doc_id")
+                if not text or not cid or not did:
+                    continue
+                obj._chunk_ids.append(str(cid))
+                obj._doc_ids.append(str(did))
+                obj._texts.append(text)
+                meta = rec.get("meta")
+                obj._metas.append(meta if isinstance(meta, dict) else None)
+        if not obj._texts:
+            raise ValueError(f"No chunks loaded from {paths}")
+        obj._idx_by_chunk_id = {cid: i for i, cid in enumerate(obj._chunk_ids)}
+        obj.bm25 = BM25Index(obj._texts)
+        obj.dense = None
+        obj.chunks_path = paths[0]
+        return obj
+
     @property
     def size(self) -> int:
         return len(self._texts)

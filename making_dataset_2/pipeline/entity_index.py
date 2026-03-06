@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -83,6 +84,8 @@ class EntityIndex:
             docs: {doc_id: full_text} for all documents to index.
         """
         t0 = time.time()
+        self._nlp = nlp  # Keep for lazy NER on uncached docs
+        self._lazy_lock = threading.Lock()
 
         # entity_text_lower -> set of doc_ids that contain this entity (per NER)
         self._entity_to_docs: dict[str, set[str]] = {}
@@ -118,8 +121,25 @@ class EntityIndex:
         return set(self._doc_texts.keys())
 
     def entities_in_doc(self, doc_id: str) -> list[str]:
-        """All spaCy entities extracted from a document (original case)."""
-        return self._doc_entities.get(doc_id, [])
+        """All spaCy entities extracted from a document (original case).
+
+        Lazily runs NER for docs not in the pre-computed cache (thread-safe).
+        """
+        if doc_id in self._doc_entities:
+            return self._doc_entities[doc_id]
+        # Lazy NER for uncached docs (e.g., BrowseComp web docs)
+        text = self._doc_texts.get(doc_id)
+        if text is None or self._nlp is None:
+            return []
+        with self._lazy_lock:
+            # Double-check after acquiring lock
+            if doc_id in self._doc_entities:
+                return self._doc_entities[doc_id]
+            entities = _extract_entities(self._nlp, text)
+            self._doc_entities[doc_id] = entities
+            for ent in entities:
+                self._entity_to_docs.setdefault(ent.lower(), set()).add(doc_id)
+        return entities
 
     def docs_containing_entity_ner(self, entity: str) -> set[str]:
         """Find doc_ids where spaCy NER extracted this entity."""
@@ -167,10 +187,15 @@ class EntityIndex:
         logger.info("EntityIndex saved to %s", path)
 
     @classmethod
-    def load(cls, path: str | Path, docs: dict[str, str]) -> "EntityIndex":
-        """Load pre-computed NER from JSON, rebuild text indexes from docs."""
+    def load(cls, path: str | Path, docs: dict[str, str], nlp=None) -> "EntityIndex":
+        """Load pre-computed NER from JSON, rebuild text indexes from docs.
+
+        If nlp is provided, uncached docs get lazy NER when entities_in_doc is called.
+        """
         data = json.loads(Path(path).read_text())
         obj = cls.__new__(cls)
+        obj._nlp = nlp
+        obj._lazy_lock = threading.Lock()
         obj._doc_entities = data["doc_entities"]
         obj._doc_texts = {}
         obj._doc_texts_lower = {}
@@ -184,8 +209,10 @@ class EntityIndex:
             for ent in entities:
                 obj._entity_to_docs.setdefault(ent.lower(), set()).add(doc_id)
 
+        n_cached = len(obj._doc_entities)
+        n_total = len(docs)
         logger.info(
-            "EntityIndex loaded: %d docs, %d unique entities",
-            len(docs), len(obj._entity_to_docs),
+            "EntityIndex loaded: %d docs (%d cached, %d lazy), %d unique entities",
+            n_total, n_cached, n_total - n_cached, len(obj._entity_to_docs),
         )
         return obj

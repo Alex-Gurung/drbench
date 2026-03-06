@@ -1,6 +1,107 @@
-"""Deterministic validation of generated questions. No LLM calls."""
+"""Validation of generated questions.
+
+check_question: deterministic (no LLM).
+check_answerable_without_doc: LLM-based trivial-answerability gate.
+"""
 
 from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+ANSWER_WITHOUT_DOC_PROMPT = """Answer the question WITHOUT access to any document.
+
+Rules:
+- If you cannot answer with high confidence, set the answer to NOT_ANSWERABLE.
+- Do not guess.
+- You MUST end your response with exactly these two lines:
+  Answer: <your answer or NOT_ANSWERABLE>
+  Justification: <brief reason>
+
+Question:
+{question}"""
+
+
+@dataclass
+class TrivialCheckResult:
+    trivial: bool  # True = answerable without doc (bad)
+    answer: str | None  # The model's answer, if trivial
+    justification: str  # Why it can/can't answer
+
+
+def _parse_answer_justification(raw: str) -> tuple[str, str]:
+    """Extract Answer: and Justification: fields from LLM response."""
+    answer_match = re.search(r"^Answer:\s*(.+)$", raw, re.MULTILINE | re.IGNORECASE)
+    just_match = re.search(r"^Justification:\s*(.+)$", raw, re.MULTILINE | re.IGNORECASE)
+    answer_line = answer_match.group(1).strip() if answer_match else ""
+    justification = just_match.group(1).strip() if just_match else ""
+    return answer_line, justification
+
+
+def check_answerable_without_doc(question: str, llm) -> TrivialCheckResult:
+    """Check if a question is trivially answerable without any document.
+
+    Returns TrivialCheckResult. If .trivial is True, the question should be rejected.
+    """
+    raw = llm.chat(
+        [{"role": "user", "content": ANSWER_WITHOUT_DOC_PROMPT.format(question=question)}],
+        temperature=0.0,
+        max_tokens=150,
+    )
+    answer_line, justification = _parse_answer_justification(raw)
+
+    if answer_line.upper() == "NOT_ANSWERABLE":
+        return TrivialCheckResult(trivial=False, answer=None, justification=justification)
+    return TrivialCheckResult(trivial=True, answer=answer_line, justification=justification)
+
+
+BACKREF_CHECK_PROMPT = """Can you answer this question WITHOUT knowing what "{placeholder}" refers to?
+
+Question: {question}
+
+Rules:
+- "{placeholder}" is an unknown value — you don't know what it is.
+- Try HARD to answer. Use reasoning, world knowledge, and process of elimination.
+  For example, if only one entity fits regardless of the unknown value, you CAN answer.
+- If you can determine or confidently guess the answer despite not knowing "{placeholder}",
+  output the answer.
+- ONLY output NOT_ANSWERABLE if changing "{placeholder}" to different values would
+  genuinely change the answer.
+- You MUST end your response with exactly these two lines:
+  Answer: <your answer or NOT_ANSWERABLE>
+  Justification: <brief reason>"""
+
+
+@dataclass
+class BackrefCheckResult:
+    independent: bool  # True = answerable without the backref (bad)
+    answer: str | None
+    justification: str
+
+
+def check_answer_needs_backref(question: str, prev_answer: str, llm) -> BackrefCheckResult:
+    """Check if a question can be answered without knowing the back-referenced value.
+
+    Replaces prev_answer with a placeholder and asks the LLM to answer.
+    If the LLM can answer → the back-reference is decorative → reject.
+    """
+    placeholder = "an unknown entity"
+    blanked = question.replace(prev_answer, placeholder)
+    # If replacement didn't change anything, the prev_answer isn't in the question
+    if blanked == question:
+        return BackrefCheckResult(independent=False, answer=None, justification="prev_answer not in question")
+
+    raw = llm.chat(
+        [{"role": "user", "content": BACKREF_CHECK_PROMPT.format(
+            question=blanked, placeholder=placeholder)}],
+        temperature=0.0,
+        max_tokens=150,
+    )
+    answer_line, justification = _parse_answer_justification(raw)
+
+    if answer_line.upper() == "NOT_ANSWERABLE":
+        return BackrefCheckResult(independent=False, answer=None, justification=justification)
+    return BackrefCheckResult(independent=True, answer=answer_line, justification=justification)
 
 
 def check_question(
@@ -53,7 +154,9 @@ def check_question(
         norm_doc = ' '.join(doc_text.lower().split())
         if norm_quote not in norm_doc:
             return f"quote not found in document: {quote[:100]!r}"
-        # Answer must appear in the quote (ensures grounding)
-        if a.lower() not in norm_quote:
-            return f"answer {a!r} not in quote: {quote[:100]!r}"
+        # Answer must appear somewhere in the document (not necessarily in the quote,
+        # since for emails the answer is often the sender/subject while the quote
+        # is the evidence sentence from the body)
+        if a.lower() not in norm_doc:
+            return f"answer {a!r} not found in document"
     return None

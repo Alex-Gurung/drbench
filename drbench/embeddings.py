@@ -16,6 +16,7 @@ Configuration:
 
 import logging
 import os
+import threading
 from typing import List, Optional
 
 import numpy as np
@@ -44,6 +45,7 @@ EMBEDDING_DIMENSIONS = {
 # Cached HuggingFace model (loading is expensive)
 _hf_model = None
 _hf_model_name = None
+_hf_lock = threading.Lock()
 
 
 def _get_openai_embeddings(texts: List[str], model: str) -> List[List[float]]:
@@ -87,55 +89,56 @@ def _get_huggingface_embeddings(texts: List[str], model: str) -> List[List[float
             "SentenceTransformers not installed. Install with: pip install drbench[hf]"
         )
 
-    # Load model if not cached or different model requested
+    # Load model if not cached or different model requested (double-checked lock)
     if _hf_model is None or _hf_model_name != model:
-        logger.info(f"Loading embedding model: {model}")
+        with _hf_lock:
+            if _hf_model is None or _hf_model_name != model:
+                logger.info(f"Loading embedding model: {model}")
 
-        try:
-            import torch
-        except ImportError:
-            raise ImportError(
-                "PyTorch not installed. Install with: pip install drbench[hf]"
-            )
+                try:
+                    import torch
+                except ImportError:
+                    raise ImportError(
+                        "PyTorch not installed. Install with: pip install drbench[hf]"
+                    )
 
-        embedding_device = os.getenv("DRBENCH_EMBEDDING_DEVICE")
-        force_cpu = bool(embedding_device and embedding_device.lower().startswith("cpu"))
+                embedding_device = os.getenv("DRBENCH_EMBEDDING_DEVICE")
+                force_cpu = bool(embedding_device and embedding_device.lower().startswith("cpu"))
 
-        if torch.cuda.is_available() and not force_cpu:
-            # Pin to single GPU to avoid device conflicts with vLLM tensor parallelism
-            num_gpus = torch.cuda.device_count()
-            default_device = f"cuda:{num_gpus - 1}" if num_gpus > 1 else "cuda:0"
-            embedding_device = embedding_device or default_device
-            logger.info(f"Loading embedding model on device: {embedding_device}")
+                if torch.cuda.is_available() and not force_cpu:
+                    num_gpus = torch.cuda.device_count()
+                    default_device = f"cuda:{num_gpus - 1}" if num_gpus > 1 else "cuda:0"
+                    embedding_device = embedding_device or default_device
+                    logger.info(f"Loading embedding model on device: {embedding_device}")
 
-            try:
-                _hf_model = SentenceTransformer(
-                    model,
-                    device=embedding_device,
-                    model_kwargs={
-                        "attn_implementation": "flash_attention_2",
-                        "torch_dtype": torch.float16,
-                    },
-                    tokenizer_kwargs={"padding_side": "left"},
-                )
-            except Exception as e:
-                logger.warning(f"Could not load with flash_attention_2: {e}")
-                _hf_model = SentenceTransformer(
-                    model,
-                    device=embedding_device,
-                    tokenizer_kwargs={"padding_side": "left"},
-                )
-        else:
-            if force_cpu:
-                logger.info("Loading embedding model on CPU (DRBENCH_EMBEDDING_DEVICE=cpu)")
-            _hf_model = SentenceTransformer(
-                model,
-                device="cpu" if force_cpu else None,
-                tokenizer_kwargs={"padding_side": "left"},
-            )
+                    try:
+                        _hf_model = SentenceTransformer(
+                            model,
+                            device=embedding_device,
+                            model_kwargs={
+                                "attn_implementation": "flash_attention_2",
+                                "torch_dtype": torch.float16,
+                            },
+                            tokenizer_kwargs={"padding_side": "left"},
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not load with flash_attention_2: {e}")
+                        _hf_model = SentenceTransformer(
+                            model,
+                            device=embedding_device,
+                            tokenizer_kwargs={"padding_side": "left"},
+                        )
+                else:
+                    if force_cpu:
+                        logger.info("Loading embedding model on CPU (DRBENCH_EMBEDDING_DEVICE=cpu)")
+                    _hf_model = SentenceTransformer(
+                        model,
+                        device="cpu" if force_cpu else None,
+                        tokenizer_kwargs={"padding_side": "left"},
+                    )
 
-        _hf_model_name = model
-        logger.info(f"Embedding model loaded: {model}")
+                _hf_model_name = model
+                logger.info(f"Embedding model loaded: {model}")
 
     embeddings = _hf_model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
     return embeddings.tolist()

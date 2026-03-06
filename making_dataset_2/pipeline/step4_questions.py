@@ -32,6 +32,21 @@ The previous answer was "{prev_answer}". Write a question where:
   BAD: "What company has X, which is growing by {prev_answer}..." (prev_answer is a side descriptor)
   GOOD: "What regulation applies to systems that achieved {prev_answer}..." (prev_answer drives the question)
 - The answer is "{target_answer}" (1-5 words, no source references)
+- CRITICAL: The answer must NOT be determinable if "{prev_answer}" were unknown.
+  The question must genuinely REQUIRE knowing "{prev_answer}" to arrive at the answer.
+  "{prev_answer}" must DISCRIMINATE between multiple possible answers — changing its
+  value should change the answer. If only one entity could ever be the answer regardless
+  of "{prev_answer}", the question is bad.
+  BAD: "Who stars in The Wolf of Wall Street and was born in {prev_answer}?" (answer is Leo regardless)
+  BAD: "What dosage of Drug X had {prev_answer} response rate in Trial Y?" (only one dosage exists)
+  GOOD: "What film starring {prev_answer} was released in 2013?" (answer depends on knowing {prev_answer})
+  GOOD: "What country contributed {prev_answer} of publications in the oncology study?" (multiple countries possible)
+- The question must be SPECIFIC enough to have exactly one correct answer.
+  Include one or two identifying details (a name, organization, event) from the
+  document so the question can't be answered by a different source that happens
+  to also mention "{prev_answer}".
+  BAD: "How many visits does {prev_answer} cover?" (many things could cost that amount)
+  GOOD: "How many visits to Karst Stages park does {prev_answer} cover?" (uniquely answerable)
 
 First find the exact sentence in the document that connects "{prev_answer}" to \
 "{target_answer}", then write the question based on that sentence.
@@ -64,6 +79,20 @@ The previous answer was "{prev_answer}". Write a question where:
   GOOD: "What consequence leads {prev_answer} of retailers to..." (prev_answer drives the question)
 - The answer is one of the entities below (match exactly)
 - Pick the entity with the strongest factual link to "{prev_answer}" in the document
+- CRITICAL: The answer must NOT be determinable if "{prev_answer}" were unknown.
+  The question must genuinely REQUIRE knowing "{prev_answer}" to arrive at the answer.
+  "{prev_answer}" must DISCRIMINATE between multiple possible answers — changing its
+  value should change the answer. If only one entity could ever be the answer regardless
+  of "{prev_answer}", the question is bad.
+  BAD: "Who stars in The Wolf of Wall Street and was born in {prev_answer}?" (answer is Leo regardless)
+  BAD: "What firm reported {prev_answer} of companies published ESG reports?" (only one firm does this study)
+  GOOD: "What regulation does {prev_answer} comply with?" (answer depends on knowing {prev_answer})
+- The question must be SPECIFIC enough to have exactly one correct answer.
+  Include one or two identifying details (a name, organization, event) from the
+  document so the question can't be answered by a different source that happens
+  to also mention "{prev_answer}".
+  BAD: "What percentage increase was reported for {prev_answer}?" (vague — increase in what?)
+  GOOD: "What percentage increase in Q3 2024 revenue did Acme Corp report for {prev_answer}?" (pinned)
 
 ENTITIES:
 {entity_list}
@@ -191,11 +220,15 @@ def generate_question_pick(
 
 PROMPT_RANK = '''\
 You are evaluating questions for a multi-hop QA chain.
-The previous answer was "{prev_answer}". Each candidate question should:
-- Use "{prev_answer}" as the subject or key qualifier, not buried in a relative clause \
-(e.g. "...which is growing by {prev_answer}" is bad — it's a side descriptor)
-- Have a clear, specific, factual connection between the question and answer
-- Sound natural and well-formed
+The previous answer was "{prev_answer}". Rank by these criteria (most important first):
+
+1. SPECIFICITY: The question should have exactly one correct answer. Prefer questions
+   that include identifying details (names, dates, organizations) so they can't be
+   confused with a different context that also mentions "{prev_answer}".
+   WORSE: "How many visits does $1,200 cover?" (ambiguous — many things cost $1,200)
+   BETTER: "How many visits to Karst Stages park does $1,200 cover?" (unique answer)
+2. CENTRALITY: "{prev_answer}" should be the subject or key qualifier, not a side detail.
+3. NATURALNESS: The question should sound like something a person would actually ask.
 
 Rank these candidates from best to worst. Output ONLY the ranking as a \
 comma-separated list of numbers (e.g. "2, 1, 3").

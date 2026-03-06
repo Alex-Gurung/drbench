@@ -15,9 +15,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import gc
 import json
 import logging
 import random
+import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -33,13 +37,18 @@ from making_dataset_2.llm import LLMClient
 from making_dataset_2.pipeline.entity_index import EntityIndex
 from making_dataset_2.pipeline.find_bridge import find_bridge
 from making_dataset_2.retrieval.hybrid import HybridSearcher
+from making_dataset_2.retrieval.search_client import SearchClient
 from making_dataset_2.pipeline.step1_seed import select_seed, select_web_seed
 from making_dataset_2.pipeline.step4_questions import (
     generate_question_constrained,
     generate_question_pick,
     rank_questions,
 )
-from making_dataset_2.pipeline.step5_check import check_question
+from making_dataset_2.pipeline.step5_check import (
+    check_answer_needs_backref,
+    check_answerable_without_doc,
+    check_question,
+)
 from making_dataset_2.pipeline.step7_verify import verify_chain
 from making_dataset_2.types import Chain, ChainState, HopRecord
 
@@ -49,7 +58,10 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 
 DEFAULT_SECRETS = ROOT_DIR / "making_dataset_2" / "outputs" / "secret_inventory.jsonl"
 DEFAULT_CHUNKS_LOCAL = ROOT_DIR / "making_dataset" / "outputs" / "chunks_local.jsonl"
-DEFAULT_CHUNKS_WEB = ROOT_DIR / "making_dataset_2" / "outputs" / "chunks_web_drbench_urls.jsonl"
+DEFAULT_CHUNKS_WEB = [
+    ROOT_DIR / "making_dataset" / "outputs" / "chunks_web.jsonl",  # BrowseComp-Plus (100K docs)
+    ROOT_DIR / "making_dataset_2" / "outputs" / "chunks_web_drbench_urls.jsonl",  # curated DrBench URLs
+]
 
 MAX_CANDIDATES = 8  # Bridge candidates to generate questions for
 MAX_ENTITY_LIST = 20  # Max entities to show in pick prompt
@@ -195,6 +207,34 @@ def build_one_chain(
                         intra_cache[be_key] = None
                         continue
 
+                    trivial = check_answerable_without_doc(q_intra, llm)
+                    llm_calls += 1
+                    if record_trace:
+                        state.trace.append({
+                            "step": "check_trivial_intra", "transition": jump_idx + 1,
+                            "question": q_intra, "trivial": trivial.trivial,
+                            "model_answer": trivial.answer, "justification": trivial.justification,
+                        })
+                    if trivial.trivial:
+                        logger.info("  Intra TRIVIAL: %r → %r (%s)", q_intra[:60], trivial.answer, trivial.justification)
+                        intra_cache[be_key] = None
+                        continue
+
+                    backref = check_answer_needs_backref(q_intra, current_answer, llm)
+                    llm_calls += 1
+                    if record_trace:
+                        state.trace.append({
+                            "step": "check_backref_intra", "transition": jump_idx + 1,
+                            "question": q_intra, "prev_answer": current_answer,
+                            "independent": backref.independent,
+                            "model_answer": backref.answer, "justification": backref.justification,
+                        })
+                    if backref.independent:
+                        logger.info("  Intra BACKREF-INDEPENDENT: %r answerable without %r → %r (%s)",
+                                    q_intra[:60], current_answer, backref.answer, backref.justification)
+                        intra_cache[be_key] = None
+                        continue
+
                     intra_result = {"intra_q": q_intra, "intra_a": a_intra, "intra_quote": quote_intra}
                     intra_cache[be_key] = intra_result
                     option.update(intra_result)
@@ -243,6 +283,32 @@ def build_one_chain(
                 })
             if err:
                 logger.info("  Inter FAIL: %s | Q=%r A=%r", err, q_inter[:80], a_inter)
+                continue
+
+            trivial = check_answerable_without_doc(q_inter, llm)
+            llm_calls += 1
+            if record_trace:
+                state.trace.append({
+                    "step": "check_trivial_inter", "transition": jump_idx + 1,
+                    "question": q_inter, "trivial": trivial.trivial,
+                    "model_answer": trivial.answer, "justification": trivial.justification,
+                })
+            if trivial.trivial:
+                logger.info("  Inter TRIVIAL: %r → %r (%s)", q_inter[:60], trivial.answer, trivial.justification)
+                continue
+
+            backref_inter = check_answer_needs_backref(q_inter, bridge_entity, llm)
+            llm_calls += 1
+            if record_trace:
+                state.trace.append({
+                    "step": "check_backref_inter", "transition": jump_idx + 1,
+                    "question": q_inter, "prev_answer": bridge_entity,
+                    "independent": backref_inter.independent,
+                    "model_answer": backref_inter.answer, "justification": backref_inter.justification,
+                })
+            if backref_inter.independent:
+                logger.info("  Inter BACKREF-INDEPENDENT: %r answerable without %r → %r (%s)",
+                            q_inter[:60], bridge_entity, backref_inter.answer, backref_inter.justification)
                 continue
 
             option["inter_q"] = q_inter
@@ -481,7 +547,7 @@ def _parse_args() -> argparse.Namespace:
 
     p.add_argument("--secrets", default=str(DEFAULT_SECRETS))
     p.add_argument("--chunks-local", default=str(DEFAULT_CHUNKS_LOCAL))
-    p.add_argument("--chunks-web", default=str(DEFAULT_CHUNKS_WEB))
+    p.add_argument("--chunks-web", nargs="+", default=[str(p) for p in DEFAULT_CHUNKS_WEB])
 
     p.add_argument("--task", default=None, help="Filter by task ID (e.g. DR0001)")
     p.add_argument("--company", default=None, help="Filter by company name")
@@ -490,23 +556,35 @@ def _parse_args() -> argparse.Namespace:
                    help="Retrieval to expand bridge candidates (default: none = entity-only)")
     p.add_argument("--retrieval-k", type=int, default=50,
                    help="Number of chunks to retrieve for bridge expansion")
+    p.add_argument("--search-url", default=None,
+                   help="URL of BM25 search server (avoids loading indexes in-process)")
+    p.add_argument("--workers", type=int, default=1, help="Parallel chain builders (default 1)")
+    p.add_argument("--min-max-tokens", type=int, default=None,
+                   help="Floor for max_tokens on all LLM calls (useful for reasoning models)")
     p.add_argument("--no-trace", action="store_true")
+    p.add_argument("--resume", action="store_true",
+                   help="Resume from existing output file, skipping already-completed chains")
     p.add_argument("--seed", type=int, default=None, help="Random seed")
     p.add_argument("--verbose", action="store_true")
     return p.parse_args()
 
 
-def _load_web_docs(chunks_web_path: Path) -> dict[str, str]:
-    """Load web chunks and build doc_id -> full text mapping."""
+def _load_web_docs(chunks_web_paths: list[Path]) -> dict[str, str]:
+    """Load web chunks from one or more JSONL files and build doc_id -> full text mapping."""
     docs: dict[str, list[tuple[int, str]]] = {}
-    with open(chunks_web_path) as f:
-        for line in f:
-            row = json.loads(line)
-            doc_id = row.get("doc_id", row.get("chunk_id", ""))
-            text = row.get("text", "")
-            offset = (row.get("offsets") or {}).get("start", 0)
-            if doc_id and text:
-                docs.setdefault(doc_id, []).append((offset, text))
+    for path in chunks_web_paths:
+        if not path.exists():
+            logger.warning("Web chunks file not found: %s", path)
+            continue
+        logger.info("Loading web chunks from %s ...", path.name)
+        with open(path) as f:
+            for line in f:
+                row = json.loads(line)
+                doc_id = row.get("doc_id", row.get("chunk_id", ""))
+                text = row.get("text", "")
+                offset = (row.get("offsets") or {}).get("start", 0)
+                if doc_id and text:
+                    docs.setdefault(doc_id, []).append((offset, text))
 
     result: dict[str, str] = {}
     for doc_id, chunks in docs.items():
@@ -518,10 +596,26 @@ def _load_web_docs(chunks_web_path: Path) -> dict[str, str]:
 def main() -> int:
     args = _parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # Verbose: full logs to stderr. Quiet: only warnings to stderr, detailed to log file.
+    output_path = Path(args.output)
+    if args.verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    else:
+        log_file = output_path.with_suffix(".log")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            filename=str(log_file),
+            filemode="w",
+        )
+        # Show only warnings on stderr
+        console = logging.StreamHandler(sys.stderr)
+        console.setLevel(logging.WARNING)
+        logging.getLogger().addHandler(console)
+        print(f"Detailed logs: {log_file}", file=sys.stderr)
     for _lib in ("httpx", "httpcore", "openai", "urllib3"):
         logging.getLogger(_lib).setLevel(logging.WARNING)
 
@@ -548,19 +642,54 @@ def main() -> int:
     local_doc_ids = set(local_docs.keys())
     logger.info("Loaded %d local documents", len(local_docs))
 
-    # Load web docs
-    web_docs: dict[str, str] = {}
-    chunks_web_path = Path(args.chunks_web)
-    if chunks_web_path.exists():
-        logger.info("Loading web chunks...")
-        web_docs = _load_web_docs(chunks_web_path)
-        logger.info("Loaded %d web documents", len(web_docs))
-    web_doc_ids = set(web_docs.keys())
-
     # Load seeds
     secrets = load_secrets(Path(args.secrets))
     eligible = filter_seed_secrets(secrets, doc_lookup, task_id=args.task, company=args.company)
     logger.info("%d secrets, %d eligible seeds", len(secrets), len(eligible))
+
+    # Group local docs and secrets by task_id (each task is an isolated doc set)
+    task_local_doc_ids: dict[str, set[str]] = {}
+    for doc_id in local_doc_ids:
+        doc = doc_lookup.get(doc_id)
+        tid = doc.meta.get("task_id", "") if doc else ""
+        if tid:
+            task_local_doc_ids.setdefault(tid, set()).add(doc_id)
+
+    task_secrets: dict[str, list] = {}
+    for s in eligible:
+        doc = doc_lookup.get(s.doc_id)
+        tid = doc.meta.get("task_id", "") if doc else ""
+        if tid:
+            task_secrets.setdefault(tid, []).append(s)
+
+    # Filter by --task or --company
+    if args.task:
+        task_local_doc_ids = {t: ids for t, ids in task_local_doc_ids.items() if t == args.task}
+        task_secrets = {t: s for t, s in task_secrets.items() if t == args.task}
+    elif args.company:
+        keep = {
+            doc.meta.get("task_id", "")
+            for doc in doc_lookup.values()
+            if args.company.lower() in (doc.meta.get("company_name") or "").lower()
+        }
+        task_local_doc_ids = {t: ids for t, ids in task_local_doc_ids.items() if t in keep}
+        task_secrets = {t: s for t, s in task_secrets.items() if t in keep}
+
+    if not task_local_doc_ids:
+        logger.error("No tasks matched after filtering. Check --task/--company flags.")
+        return 1
+
+    for tid in sorted(task_local_doc_ids):
+        doc0 = next(iter(task_local_doc_ids[tid]))
+        company = (doc_lookup[doc0].meta.get("company_name") or "?") if doc0 in doc_lookup else "?"
+        logger.info("  %s (%s): %d docs, %d secrets",
+                     tid, company, len(task_local_doc_ids[tid]), len(task_secrets.get(tid, [])))
+
+    # Load web docs
+    chunks_web_paths = [Path(p) for p in args.chunks_web]
+    web_docs = _load_web_docs(chunks_web_paths)
+    logger.info("Loaded %d web documents from %d files", len(web_docs), len(chunks_web_paths))
+    web_doc_ids = set(web_docs.keys())
 
     # Build or load entity index
     all_docs = {**local_docs, **web_docs}
@@ -568,13 +697,16 @@ def main() -> int:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"entity_index_{args.spacy_model}.json"
 
+    # Always load spaCy for lazy NER on uncached docs (e.g., BrowseComp web docs)
+    import spacy
+    logger.info("Loading spaCy model %s...", args.spacy_model)
+    nlp = spacy.load(args.spacy_model)
+
     if cache_path.exists():
         logger.info("Loading cached entity index from %s", cache_path)
-        entity_index = EntityIndex.load(cache_path, all_docs)
+        entity_index = EntityIndex.load(cache_path, all_docs, nlp=nlp)
     else:
         logger.info("Building entity index (spaCy NER: %s)...", args.spacy_model)
-        import spacy
-        nlp = spacy.load(args.spacy_model)
         entity_index = EntityIndex(nlp, all_docs)
         entity_index.save(cache_path)
         logger.info("Saved entity index to %s", cache_path)
@@ -583,105 +715,229 @@ def main() -> int:
     local_searcher = None
     web_searcher = None
     if args.retrieval_mode != "none":
-        logger.info("Building retrieval searchers (mode=%s, k=%d)...", args.retrieval_mode, args.retrieval_k)
-        chunks_local_path = Path(args.chunks_local)
-        if chunks_local_path.exists():
-            local_searcher = HybridSearcher(chunks_path=chunks_local_path)
-            logger.info("Local searcher: %d chunks", local_searcher.size)
-        if chunks_web_path.exists():
-            web_searcher = HybridSearcher(chunks_path=chunks_web_path)
-            logger.info("Web searcher: %d chunks", web_searcher.size)
+        if args.search_url:
+            # Use remote search server (saves ~15-20GB of in-process memory)
+            logger.info("Using search server at %s", args.search_url)
+            local_searcher = SearchClient(args.search_url, pool="local")
+            web_searcher = SearchClient(args.search_url, pool="web")
+            health = web_searcher.health()
+            logger.info("Search server pools: %s", health.get("pools", {}))
+        else:
+            logger.info("Building in-process retrieval searchers (mode=%s, k=%d)...",
+                        args.retrieval_mode, args.retrieval_k)
+            chunks_local_path = Path(args.chunks_local)
+            if chunks_local_path.exists():
+                local_searcher = HybridSearcher(chunks_path=chunks_local_path)
+                logger.info("Local searcher: %d chunks", local_searcher.size)
+            existing_web_paths = [p for p in chunks_web_paths if p.exists()]
+            if existing_web_paths:
+                web_searcher = HybridSearcher.from_paths(existing_web_paths)
+                logger.info("Web searcher: %d chunks from %d files", web_searcher.size, len(existing_web_paths))
+
+    # Free data structures no longer needed (entity_index holds doc texts from here)
+    del local_docs, web_docs, all_docs, chunks
+    gc.collect()
+    logger.info("Freed intermediate data, running gc")
 
     # Build LLM client
-    llm = LLMClient(model=args.model, base_url=args.base_url, api_key=args.api_key)
+    llm = LLMClient(model=args.model, base_url=args.base_url, api_key=args.api_key,
+                     min_max_tokens=args.min_max_tokens)
     record_trace = not args.no_trace
 
     # Build chains
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    results: list[dict] = []
-    total = len(patterns) * args.n
-    chain_num = 0
-
+    # Pre-plan all (pattern, index, rng_seed) tasks for deterministic parallel execution
+    tasks: list[tuple[str, int, int]] = []
     for pattern in patterns:
-        logger.info("=" * 70)
-        logger.info("Pattern: %s (%d chains)", pattern, args.n)
-        logger.info("=" * 70)
-
         for i in range(args.n):
-            chain_num += 1
-            logger.info("=" * 60)
-            logger.info("Chain %d/%d (pattern=%s, #%d/%d)", chain_num, total, pattern, i + 1, args.n)
-            logger.info("=" * 60)
+            tasks.append((pattern, i, rng.randint(0, 2**31)))
 
-            # Pick seed based on first character of pattern
+    total = len(tasks)
+    results: list[dict] = [None] * total  # type: ignore[list-item]
+
+    # Shared progress state
+    lock = threading.Lock()
+    completed = [0]
+    n_valid = [0]
+    n_complete = [0]
+    t_start = time.time()
+    pattern_stats: dict[str, dict[str, int]] = {p: {"valid": 0, "complete": 0, "done": 0} for p in patterns}
+
+    def _progress_line() -> str:
+        done = completed[0]
+        elapsed = time.time() - t_start
+        rate = done / elapsed if elapsed > 0 and done > 0 else 0
+        eta = (total - done) / rate if rate > 0 else 0
+        parts = " | ".join(f"{p} {s['valid']}/{s['done']}" for p, s in pattern_stats.items() if s["done"])
+        return (
+            f"[{done}/{total}] "
+            f"{n_valid[0]} valid, {n_complete[0] - n_valid[0]} complete-invalid, {done - n_complete[0]} incomplete  "
+            f"ETA {int(eta // 60)}m{int(eta % 60):02d}s  "
+            f"({parts})"
+        )
+
+    def _build_one(task_idx: int, pattern: str, idx: int, task_seed: int) -> None:
+        task_rng = random.Random(task_seed)
+
+        # Randomly pick a task for this chain
+        task_ids = sorted(task_local_doc_ids.keys())
+        chain_task = task_rng.choice(task_ids)
+        chain_local_ids = task_local_doc_ids[chain_task]
+        chain_secrets = task_secrets.get(chain_task, [])
+        doc0 = next(iter(chain_local_ids))
+        chain_company = (doc_lookup[doc0].meta.get("company_name") or "?") if doc0 in doc_lookup else "?"
+
+        try:
+            if pattern[0] == "L":
+                state = select_seed(
+                    chain_secrets, doc_lookup,
+                    pattern=pattern,
+                    task_id=chain_task, company=chain_company,
+                    rng=task_rng,
+                )
+            else:
+                state = select_web_seed(
+                    entity_index, web_doc_ids, chain_local_ids, llm,
+                    pattern=pattern,
+                    task_id=chain_task, company=chain_company,
+                    rng=task_rng,
+                )
+        except ValueError as e:
+            logger.error("Seed selection failed for %s #%d (%s/%s): %s",
+                         pattern, idx + 1, chain_task, chain_company, e)
+            return
+
+        chain = build_one_chain(
+            state=state,
+            llm=llm,
+            entity_index=entity_index,
+            local_doc_ids=chain_local_ids,
+            web_doc_ids=web_doc_ids,
+            record_trace=record_trace,
+            local_searcher=local_searcher,
+            web_searcher=web_searcher,
+            retrieval_k=args.retrieval_k,
+        )
+
+        d = _chain_to_dict(chain)
+        d["metadata"]["task_idx"] = task_idx
+        is_valid = chain.verification and chain.verification.is_valid
+        is_complete = chain.metadata.get("complete", False)
+
+        with lock:
+            results[task_idx] = d
+            completed[0] += 1
+            if is_valid:
+                n_valid[0] += 1
+            if is_complete:
+                n_complete[0] += 1
+            pattern_stats[pattern]["done"] += 1
+            if is_valid:
+                pattern_stats[pattern]["valid"] += 1
+            if is_complete:
+                pattern_stats[pattern]["complete"] += 1
+
+            status = "VALID" if is_valid else ("COMPLETE" if is_complete else "INCOMPLETE")
+            secs = chain.metadata.get("elapsed_seconds", 0)
+            n_hops = len(chain.hop_history)
+            print(
+                f"  {status:10s} {pattern} #{idx+1:2d}  "
+                f"{n_hops} hops  {secs:5.1f}s  "
+                f"{chain.chain_id}  [{chain_task} {chain_company}]",
+                file=sys.stderr,
+            )
+            print(f"  {_progress_line()}", file=sys.stderr)
+
+            # Write incrementally
+            with open(output_path, "a") as f:
+                f.write(json.dumps(d, ensure_ascii=False) + "\n")
+
+    # Resume: load existing results and skip completed task indices
+    skip_indices: set[int] = set()
+    if args.resume and output_path.exists() and output_path.stat().st_size > 0:
+        for line in open(output_path):
             try:
-                if pattern[0] == "L":
-                    state = select_seed(
-                        eligible, doc_lookup,
-                        pattern=pattern,
-                        task_id=args.task,
-                        company=args.company,
-                        rng=rng,
-                    )
-                else:  # W-starting
-                    state = select_web_seed(
-                        entity_index, web_doc_ids, local_doc_ids, llm,
-                        pattern=pattern,
-                        task_id=args.task,
-                        company=args.company,
-                        rng=rng,
-                    )
-            except ValueError as e:
-                logger.error("Seed selection failed: %s", e)
+                d = json.loads(line)
+                tidx = d.get("metadata", {}).get("task_idx")
+                if tidx is not None:
+                    skip_indices.add(tidx)
+                    results[tidx] = d
+                    # Restore counters
+                    p = d["pattern"]
+                    completed[0] += 1
+                    is_v = d.get("verification", {}).get("is_valid", False)
+                    is_c = d.get("metadata", {}).get("complete", False)
+                    if is_v:
+                        n_valid[0] += 1
+                    if is_c:
+                        n_complete[0] += 1
+                    pattern_stats[p]["done"] += 1
+                    if is_v:
+                        pattern_stats[p]["valid"] += 1
+                    if is_c:
+                        pattern_stats[p]["complete"] += 1
+            except (json.JSONDecodeError, KeyError):
                 continue
+        print(f"Resumed: {len(skip_indices)} chains already done, "
+              f"{total - len(skip_indices)} remaining\n", file=sys.stderr)
+    else:
+        output_path.write_text("")
 
-            logger.info(
-                "Seed: Q=%r A=%r doc=%s",
-                state.global_question[:80], state.global_answer, state.hop_history[0].doc_id[:40],
-            )
+    workers = max(1, args.workers)
+    remaining = total - len(skip_indices)
+    print(f"Building {remaining} chains ({', '.join(f'{p}x{args.n}' for p in patterns)}) "
+          f"with {workers} workers\n", file=sys.stderr)
 
-            chain = build_one_chain(
-                state=state,
-                llm=llm,
-                entity_index=entity_index,
-                local_doc_ids=local_doc_ids,
-                web_doc_ids=web_doc_ids,
-                record_trace=record_trace,
-                local_searcher=local_searcher,
-                web_searcher=web_searcher,
-                retrieval_k=args.retrieval_k,
-            )
+    if workers == 1:
+        for task_idx, (pattern, idx, task_seed) in enumerate(tasks):
+            if task_idx in skip_indices:
+                continue
+            _build_one(task_idx, pattern, idx, task_seed)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = []
+            for task_idx, (pattern, idx, task_seed) in enumerate(tasks):
+                if task_idx in skip_indices:
+                    continue
+                futures.append(pool.submit(_build_one, task_idx, pattern, idx, task_seed))
+            concurrent.futures.wait(futures)
+            # Collect worker exceptions
+            worker_errors = []
+            for f in futures:
+                exc = f.exception()
+                if exc:
+                    logger.error("Worker failed: %s", exc)
+                    worker_errors.append(exc)
+            if worker_errors:
+                print(f"\nWARNING: {len(worker_errors)} worker(s) failed with exceptions",
+                      file=sys.stderr)
 
-            d = _chain_to_dict(chain)
-            results.append(d)
-
-            status = "VALID" if chain.verification and chain.verification.is_valid else "INCOMPLETE"
-            logger.info(
-                "Chain %s: %s (%d hops, %d jumps, %d LLM calls, %.1fs)",
-                chain.chain_id, status,
-                len(chain.hop_history), chain.metadata.get("n_jumps", 0),
-                chain.metadata.get("llm_calls", 0), chain.metadata.get("elapsed_seconds", 0),
-            )
-
-            _pretty_print_chain(chain)
-
-    # Write output
+    # Re-write in deterministic order (parallel may have written out-of-order)
+    final_results = [r for r in results if r is not None]
+    n_missing = total - len(skip_indices) - (len(final_results) - len(skip_indices))
+    if n_missing > 0:
+        print(f"\nWARNING: {n_missing} chain(s) missing from output (worker crashes or seed failures)",
+              file=sys.stderr)
     with open(output_path, "w") as f:
-        for d in results:
+        for d in final_results:
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
-    logger.info("Wrote %d chains to %s", len(results), output_path)
 
-    valid = sum(1 for d in results if d.get("verification", {}).get("is_valid"))
-    complete = sum(1 for d in results if d.get("metadata", {}).get("complete"))
-    print(f"\nResults: {valid}/{len(results)} valid, {complete}/{len(results)} complete")
+    # Final summary
+    valid = sum(1 for d in final_results if d.get("verification", {}).get("is_valid"))
+    complete = sum(1 for d in final_results if d.get("metadata", {}).get("complete"))
+    elapsed = time.time() - t_start
+    print(f"\n{'=' * 60}", file=sys.stderr)
+    print(f"Done in {int(elapsed // 60)}m{int(elapsed % 60):02d}s — "
+          f"{valid}/{len(final_results)} valid, {complete}/{len(final_results)} complete", file=sys.stderr)
     for p in patterns:
-        p_results = [d for d in results if d["pattern"] == p]
-        p_valid = sum(1 for d in p_results if d.get("verification", {}).get("is_valid"))
-        p_complete = sum(1 for d in p_results if d.get("metadata", {}).get("complete"))
-        print(f"  {p}: {p_valid}/{len(p_results)} valid, {p_complete}/{len(p_results)} complete")
+        s = pattern_stats[p]
+        print(f"  {p}: {s['valid']}/{s['done']} valid, {s['complete']}/{s['done']} complete", file=sys.stderr)
+    print(f"\nWrote {len(final_results)} chains to {output_path}", file=sys.stderr)
 
+    if n_missing > 0:
+        return 1
     return 0
 
 

@@ -130,33 +130,42 @@ def find_bridge(
         ))
 
     # --- Entity path: entities in current_doc that appear in next-pool docs ---
+    # Skip exhaustive entity scan for large pools when BM25 is available:
+    # substring search over 100K+ docs per entity is too slow.
     current_doc_text_lower = entity_index.doc_text(current_doc_id).lower()
     current_entities = entity_index.entities_in_doc(current_doc_id)
+    _EXHAUSTIVE_ENTITY_LIMIT = 1000
 
-    for ent in current_entities:
-        ent_lower = ent.lower()
-        if ent_lower == answer_lower:
-            continue  # Already handled in fast path
-        if len(ent_lower) < 3:
-            continue
-        if ent_lower in used:
-            continue  # Skip already-used answers
-
-        matching_docs = entity_index.docs_containing_text(ent, pool=search_pool)
-        for doc_id in matching_docs:
-            key = (doc_id, ent_lower)
-            if key in seen_keys:
+    if len(search_pool) <= _EXHAUSTIVE_ENTITY_LIMIT or searcher is None:
+        for ent in current_entities:
+            ent_lower = ent.lower()
+            if ent_lower == answer_lower:
+                continue  # Already handled in fast path
+            if len(ent_lower) < 3:
                 continue
-            seen_keys.add(key)
+            if ent_lower in used:
+                continue  # Skip already-used answers
 
-            proximity = _min_distance(current_doc_text_lower, current_answer, ent)
-            # Negate so closer = higher score (sorted descending)
-            entity_candidates.append(BridgeCandidate(
-                target_doc_id=doc_id,
-                bridge_entity=ent,
-                needs_intra=True,
-                score=-proximity,
-            ))
+            matching_docs = entity_index.docs_containing_text(ent, pool=search_pool)
+            for doc_id in matching_docs:
+                key = (doc_id, ent_lower)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+
+                proximity = _min_distance(current_doc_text_lower, current_answer, ent)
+                # Negate so closer = higher score (sorted descending)
+                entity_candidates.append(BridgeCandidate(
+                    target_doc_id=doc_id,
+                    bridge_entity=ent,
+                    needs_intra=True,
+                    score=-proximity,
+                ))
+    else:
+        logger.debug(
+            "Skipping exhaustive entity scan: pool size %d > %d (BM25 will handle it)",
+            len(search_pool), _EXHAUSTIVE_ENTITY_LIMIT,
+        )
 
     # --- Retrieval path: BM25 expands candidate pool, then entity-filtered ---
     retrieval_new = 0
