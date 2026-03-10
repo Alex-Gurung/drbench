@@ -107,38 +107,40 @@ class ReportAssembler:
         if not sub_questions:
             sub_questions = [{"num": "1", "text": clean_question}]
 
-        # Gather all relevant content from vector store
-        all_content = []
-        if self.vector_store:
-            for sq in sub_questions:
-                results = self.vector_store.search(sq["text"], top_k=10, use_semantic=True)
-                for r in results:
-                    if r.get("similarity_score", 0) > 0.3:
-                        all_content.append({
-                            "doc_id": r.get("doc_id", ""),
-                            "text": r.get("content", "")[:2000],
-                            "source_type": r.get("metadata", {}).get("source_type", "unknown"),
-                            "score": r.get("similarity_score", 0),
-                        })
+        # Gather primary source evidence from vector store and preserve original metadata
+        unique_content = self._collect_concise_qa_evidence(sub_questions)
 
-        # Deduplicate by doc_id
-        seen = set()
-        unique_content = []
-        for c in sorted(all_content, key=lambda x: -x["score"]):
-            if c["doc_id"] not in seen:
-                seen.add(c["doc_id"])
-                unique_content.append(c)
-
-        # Register documents in citation registry so finalize_citations works
-        for c in unique_content[:30]:
-            if c["doc_id"]:
-                self.citation_registry.register_document(
-                    doc_id=c["doc_id"],
-                    source_info={"source_type": c["source_type"], "score": c["score"]},
+        # Register documents in citation registry with full source metadata
+        for content_item in unique_content[:30]:
+            if content_item["doc_id"]:
+                self._get_source_citation_id(
+                    {
+                        "doc_id": content_item["doc_id"],
+                        "metadata": content_item["metadata"],
+                    }
                 )
 
+        evidence_items = []
+        for content_item in unique_content[:30]:
+            source_info = self._extract_source_info(
+                {
+                    "doc_id": content_item["doc_id"],
+                    "metadata": content_item["metadata"],
+                }
+            )
+            evidence_entry = {
+                "doc_id": content_item["doc_id"],
+                "source_type": source_info.get("type", "unknown"),
+                "source_title": source_info.get("title", "Unknown Source"),
+                "content": content_item["text"],
+                "score": round(content_item["score"], 3),
+            }
+            if source_info.get("source_document_ids"):
+                evidence_entry["underlying_doc_ids"] = source_info["source_document_ids"]
+            evidence_items.append(evidence_entry)
+
         # Truncate total content to fit context
-        content_text = json.dumps(unique_content[:30], indent=2)
+        content_text = json.dumps(evidence_items, indent=2)
         if len(content_text) > self.max_content_length:
             content_text = content_text[:self.max_content_length]
 
@@ -171,9 +173,13 @@ JUSTIFICATION_FINAL: <1-2 sentences explaining how sub-answers combine>
 Rules:
 - Answers should be as concise as possible (a number, a name, a percentage)
 - Justifications should cite specific evidence using [DOC:doc_id]
+- Each JUSTIFICATION line must include at least one [DOC:doc_id] when supporting evidence exists
 - If a question references a previous answer (e.g., "over the next (1) months"), resolve it
 - If you cannot determine the answer, write: NOT_FOUND
 - Use ONLY the provided evidence
+- Output ONLY ANSWER_*/JUSTIFICATION_* lines
+- DO NOT include a thinking process, markdown headers, bullets, JSON, or any extra commentary
+- If you add extra text outside the required lines, the output is unusable
 """
 
         try:
@@ -215,6 +221,62 @@ Rules:
             self._finalize_metadata(context, action_plan, {})
 
         return final_report
+
+    def _collect_concise_qa_evidence(self, sub_questions: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """Collect concise-QA evidence while preferring primary source documents."""
+        if not self.vector_store:
+            return []
+
+        primary_content: list[Dict[str, Any]] = []
+        fallback_content: list[Dict[str, Any]] = []
+
+        for sub_question in sub_questions:
+            results = self.vector_store.search(sub_question["text"], top_k=10, use_semantic=True)
+            for result in results:
+                score = result.get("similarity_score", 0)
+                if score <= 0.3:
+                    continue
+
+                metadata = result.get("metadata", {}) or {}
+                evidence_item = {
+                    "doc_id": result.get("doc_id", ""),
+                    "text": result.get("content", "")[:2000],
+                    "metadata": metadata,
+                    "score": score,
+                }
+
+                if self._is_primary_concise_qa_source(metadata):
+                    primary_content.append(evidence_item)
+                else:
+                    fallback_content.append(evidence_item)
+
+        chosen_content = primary_content if primary_content else fallback_content
+        deduped_content: list[Dict[str, Any]] = []
+        seen_doc_ids: set[str] = set()
+
+        for content_item in sorted(chosen_content, key=lambda item: -item["score"]):
+            doc_id = content_item["doc_id"]
+            if not doc_id or doc_id in seen_doc_ids:
+                continue
+            seen_doc_ids.add(doc_id)
+            deduped_content.append(content_item)
+
+        return deduped_content
+
+    def _is_primary_concise_qa_source(self, metadata: Dict[str, Any]) -> bool:
+        """Prefer directly retrieved source documents over synthetic findings for concise QA."""
+        doc_type = metadata.get("type", "")
+        tool_used = metadata.get("tool_used", "")
+
+        if doc_type in {"research_finding", "research_report", "archived_findings"}:
+            return False
+        if doc_type in {"ai_synthesis", "ai_synthesis_with_sources"}:
+            return False
+        if doc_type == "search_result":
+            return False
+        if tool_used == "smart_analysis":
+            return False
+        return True
 
     def _analyze_and_cluster_content(self, context: ResearchContext) -> Dict[str, List[Dict]]:
         """Analyze vector store content and cluster by themes"""

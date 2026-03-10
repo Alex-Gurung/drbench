@@ -138,7 +138,12 @@ select:focus, input:focus {{ outline: none; border-color: var(--primary); }}
 .trace-step {{ background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-top: 8px; font-size: 12px; border-left: 3px solid var(--border); }}
 .trace-step.pass {{ border-left-color: var(--success); }}
 .trace-step.fail {{ border-left-color: var(--danger); }}
-.trace-label {{ font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; }}
+.trace-label {{ font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 2px; cursor: help; position: relative; display: inline-block; }}
+.trace-label .tooltip {{ visibility: hidden; background: #1a1a2e; color: #fff; padding: 8px 12px; border-radius: 6px;
+  font-size: 12px; font-weight: 400; text-transform: none; line-height: 1.5; letter-spacing: normal;
+  position: absolute; left: 0; bottom: 100%; margin-bottom: 6px; width: 320px; z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2); pointer-events: none; }}
+.trace-label:hover .tooltip {{ visibility: visible; }}
 
 /* Verification grid */
 .verify-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 8px; }}
@@ -296,7 +301,119 @@ function toggleSummary() {{
 
 function renderSummary() {{
   const el = document.getElementById('summary-view');
-  // Group by company
+
+  const statusTooltips = {{
+    valid: 'Chain is complete AND passed all 4 verification conditions: (1) not answerable with no docs, (2) not answerable with only the first doc, (3) not answerable with only the last doc, (4) answerable with all docs together. This proves the chain is truly multi-hop.',
+    invalid: 'Chain completed all hops but FAILED verification. At least one of the 4 conditions was wrong\u2014e.g. the question was answerable with just one document, meaning it\\'s not genuinely multi-hop.',
+    incomplete: 'Chain builder couldn\\'t finish all hops. Usually means no valid bridge candidate was found for a transition\u2014all inter-questions failed the gate pipeline (trivial, backref, or search leak checks).',
+  }};
+
+  // --- Breakdown table ---
+  const companies = [...new Set(CHAINS.map(c => c.metadata?.company || 'Unknown'))].sort();
+  const patterns = [...new Set(CHAINS.map(c => c.pattern || '?'))].sort();
+
+  function countBy(chains, pred) {{ return chains.filter(pred).length; }}
+
+  let h = '';
+
+  // Status legend with tooltips
+  h += `<div style="margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px">`;
+  for (const [status, tip] of Object.entries(statusTooltips)) {{
+    const cls = status === 'valid' ? '--success' : status === 'invalid' ? '--danger' : '--text-muted';
+    h += `<span class="trace-label" style="font-size:13px;text-transform:none;cursor:help">
+      <span style="color:var(${{cls}});font-weight:600">${{status}}</span>
+      <span class="tooltip">${{tip}}</span></span>`;
+  }}
+  h += `</div>`;
+
+  // Breakdown by company × pattern
+  function pct(n, total) {{ return total ? ((n/total)*100).toFixed(0) + '%' : '\u2013'; }}
+
+  h += `<h2 style="font-size:15px;margin:20px 0 10px">Breakdown by Company &times; Pattern</h2>`;
+  h += `<table class="summary-table"><thead><tr>`;
+  h += `<th>Company</th>`;
+  for (const p of patterns) h += `<th colspan="4" style="text-align:center">${{esc(p)}}</th>`;
+  h += `<th colspan="4" style="text-align:center;border-left:2px solid var(--border)">Total</th>`;
+  h += `</tr><tr><th></th>`;
+  for (const p of [...patterns, 'total']) {{
+    const style = p === 'total' ? 'border-left:2px solid var(--border);' : '';
+    h += `<th style="font-size:10px;text-align:center;${{style}}"><span class="trace-label" style="font-size:10px;cursor:help">V<span class="tooltip">${{statusTooltips.valid}}</span></span></th>`;
+    h += `<th style="font-size:10px;text-align:center"><span class="trace-label" style="font-size:10px;cursor:help">I<span class="tooltip">${{statusTooltips.invalid}}</span></span></th>`;
+    h += `<th style="font-size:10px;text-align:center"><span class="trace-label" style="font-size:10px;cursor:help">Inc<span class="tooltip">${{statusTooltips.incomplete}}</span></span></th>`;
+    h += `<th style="font-size:10px;text-align:center;color:var(--success)">%V</th>`;
+  }}
+  h += `</tr></thead><tbody>`;
+
+  const grandTotals = {{ valid: 0, invalid: 0, incomplete: 0 }};
+  const patternTotals = {{}};
+  for (const p of patterns) patternTotals[p] = {{ valid: 0, invalid: 0, incomplete: 0 }};
+
+  for (const company of companies) {{
+    const companyChains = CHAINS.filter(c => (c.metadata?.company || 'Unknown') === company);
+    let rowValid = 0, rowInvalid = 0, rowIncomplete = 0;
+
+    h += `<tr><td style="font-weight:600">${{esc(company)}}</td>`;
+    for (const p of patterns) {{
+      const subset = companyChains.filter(c => c.pattern === p);
+      const v = countBy(subset, c => getStatus(c) === 'valid');
+      const inv = countBy(subset, c => getStatus(c) === 'invalid');
+      const inc = countBy(subset, c => getStatus(c) === 'incomplete');
+      const n = v + inv + inc;
+      rowValid += v; rowInvalid += inv; rowIncomplete += inc;
+      patternTotals[p].valid += v; patternTotals[p].invalid += inv; patternTotals[p].incomplete += inc;
+
+      const vColor = v > 0 ? 'color:var(--success);font-weight:600' : 'color:var(--text-muted)';
+      const invColor = inv > 0 ? 'color:var(--danger);font-weight:600' : 'color:var(--text-muted)';
+      const incColor = inc > 0 ? 'color:var(--text-muted);font-weight:600' : 'color:var(--text-muted)';
+      const pctVal = pct(v, n);
+      const pctColor = n === 0 ? 'var(--text-muted)' : v/n >= 0.5 ? 'var(--success)' : v/n >= 0.25 ? 'var(--warning)' : 'var(--danger)';
+      h += `<td style="text-align:center;${{vColor}}">${{v || '\u2013'}}</td>`;
+      h += `<td style="text-align:center;${{invColor}}">${{inv || '\u2013'}}</td>`;
+      h += `<td style="text-align:center;${{incColor}}">${{inc || '\u2013'}}</td>`;
+      h += `<td style="text-align:center;color:${{pctColor}};font-weight:600;font-size:11px">${{pctVal}}</td>`;
+    }}
+    grandTotals.valid += rowValid; grandTotals.invalid += rowInvalid; grandTotals.incomplete += rowIncomplete;
+    const rowTotal = rowValid + rowInvalid + rowIncomplete;
+    const rowPct = pct(rowValid, rowTotal);
+    const rowPctColor = rowTotal === 0 ? 'var(--text-muted)' : rowValid/rowTotal >= 0.5 ? 'var(--success)' : rowValid/rowTotal >= 0.25 ? 'var(--warning)' : 'var(--danger)';
+    h += `<td style="text-align:center;border-left:2px solid var(--border);color:var(--success);font-weight:600">${{rowValid}}</td>`;
+    h += `<td style="text-align:center;color:var(--danger);font-weight:600">${{rowInvalid}}</td>`;
+    h += `<td style="text-align:center;font-weight:600">${{rowIncomplete}}</td>`;
+    h += `<td style="text-align:center;color:${{rowPctColor}};font-weight:700;font-size:11px">${{rowPct}}</td>`;
+    h += `</tr>`;
+  }}
+
+  // Totals row
+  h += `<tr style="border-top:2px solid var(--border);font-weight:700"><td>Total</td>`;
+  for (const p of patterns) {{
+    const t = patternTotals[p];
+    const n = t.valid + t.invalid + t.incomplete;
+    const pctVal = pct(t.valid, n);
+    const pctColor = n === 0 ? 'var(--text-muted)' : t.valid/n >= 0.5 ? 'var(--success)' : t.valid/n >= 0.25 ? 'var(--warning)' : 'var(--danger)';
+    h += `<td style="text-align:center;color:var(--success)">${{t.valid}}</td>`;
+    h += `<td style="text-align:center;color:var(--danger)">${{t.invalid}}</td>`;
+    h += `<td style="text-align:center">${{t.incomplete}}</td>`;
+    h += `<td style="text-align:center;color:${{pctColor}};font-size:11px">${{pctVal}}</td>`;
+  }}
+  const gTotal = grandTotals.valid + grandTotals.invalid + grandTotals.incomplete;
+  const gPct = pct(grandTotals.valid, gTotal);
+  const gPctColor = gTotal === 0 ? 'var(--text-muted)' : grandTotals.valid/gTotal >= 0.5 ? 'var(--success)' : grandTotals.valid/gTotal >= 0.25 ? 'var(--warning)' : 'var(--danger)';
+  h += `<td style="text-align:center;border-left:2px solid var(--border);color:var(--success)">${{grandTotals.valid}}</td>`;
+  h += `<td style="text-align:center;color:var(--danger)">${{grandTotals.invalid}}</td>`;
+  h += `<td style="text-align:center">${{grandTotals.incomplete}}</td>`;
+  h += `<td style="text-align:center;color:${{gPctColor}};font-size:11px">${{gPct}}</td>`;
+  h += `</tr></tbody></table>`;
+
+  // Validation rate summary
+  const total = grandTotals.valid + grandTotals.invalid + grandTotals.incomplete;
+  const complete = grandTotals.valid + grandTotals.invalid;
+  h += `<div style="margin:16px 0;font-size:13px;color:var(--text-secondary)">`;
+  h += `Completion rate: <b>${{total ? ((complete/total)*100).toFixed(1) : 0}}%</b> (${{complete}}/${{total}}) &middot; `;
+  h += `Validation rate (of complete): <b>${{complete ? ((grandTotals.valid/complete)*100).toFixed(1) : 0}}%</b> (${{grandTotals.valid}}/${{complete}}) &middot; `;
+  h += `Overall yield: <b>${{total ? ((grandTotals.valid/total)*100).toFixed(1) : 0}}%</b> (${{grandTotals.valid}}/${{total}})`;
+  h += `</div>`;
+
+  // --- Per-company chain detail tables (original) ---
   const byCompany = {{}};
   CHAINS.forEach(c => {{
     const co = c.metadata?.company || 'Unknown';
@@ -304,9 +421,8 @@ function renderSummary() {{
     byCompany[co].push(c);
   }});
 
-  let h = '';
   for (const [company, chains] of Object.entries(byCompany)) {{
-    h += `<h2>${{esc(company)}} (${{chains.length}} chains)</h2>`;
+    h += `<h2 style="font-size:15px;margin:24px 0 10px">${{esc(company)}} (${{chains.length}} chains)</h2>`;
     h += `<table class="summary-table"><thead><tr>`;
     h += `<th style="width:60px">Pattern</th>`;
     h += `<th style="width:70px">Task</th>`;
@@ -324,7 +440,6 @@ function renderSummary() {{
       h += `<td><span class="badge badge-L">${{esc(c.pattern)}}</span></td>`;
       h += `<td style="font-family:monospace;font-size:11px">${{esc(c.metadata?.task_id || '')}}</td>`;
 
-      // Questions cell with all hops
       h += `<td class="q-cell">`;
       for (let i = 0; i < hops.length; i++) {{
         const hop = hops[i];
@@ -344,7 +459,7 @@ function renderSummary() {{
       h += `</td>`;
 
       h += `<td class="final-answer">${{esc(c.global_answer || hops[hops.length-1]?.answer || '')}}</td>`;
-      h += `<td><span class="badge badge-${{s}}">${{s}}</span></td>`;
+      h += `<td><span class="badge badge-${{s}}" title="${{statusTooltips[s]}}">${{s}}</span></td>`;
       h += `</tr>`;
     }}
     h += `</tbody></table>`;
@@ -609,15 +724,60 @@ function showChain(idx) {{
       }}
       h += `</pre></details>`;
     }}
-    const checks = hopTraces.filter(t => t.step === 'check_intra' || t.step === 'check_inter');
+    const checkSteps = ['check_intra', 'check_inter', 'check_trivial_intra', 'check_trivial_inter',
+                         'check_backref_intra', 'check_backref_inter', 'check_search_leak'];
+    const checks = hopTraces.filter(t => checkSteps.includes(t.step));
     for (const chk of checks) {{
-      const cls = chk.passed ? 'pass' : 'fail';
-      const icon = chk.passed ? '&#10003;' : '&#10007;';
-      const label = chk.step === 'check_intra' ? 'Check Intra' : 'Check Inter';
-      h += `<div class="trace-step ${{cls}}"><div class="trace-label">${{label}}</div>`;
-      h += `<span style="color:var(${{chk.passed ? '--success' : '--danger'}})">${{icon}}</span> `;
-      if (chk.passed) h += `${{esc(chk.question||'')}} &rarr; <strong>${{esc(chk.answer||'')}}</strong>`;
-      else h += `${{esc(chk.error || 'failed')}}`;
+      const stepLabels = {{
+        'check_intra': 'Check Intra', 'check_inter': 'Check Inter',
+        'check_trivial_intra': 'Trivial Check (Intra)', 'check_trivial_inter': 'Trivial Check (Inter)',
+        'check_backref_intra': 'Backref Check (Intra)', 'check_backref_inter': 'Backref Check (Inter)',
+        'check_search_leak': 'Search Leak Check',
+      }};
+      const stepTooltips = {{
+        'check_intra': 'Deterministic check on the intra-doc question: bridge entity must appear in the question, answer must be 1\u20135 words, no duplicate answers, and the supporting quote must exist in the document.',
+        'check_inter': 'Deterministic check on the inter-doc question: bridge entity must appear in the question, answer must be 1\u20135 words, no duplicate answers, and the supporting quote must exist in the target document.',
+        'check_trivial_intra': 'LLM gate: can the model answer this question with zero context? If yes, the question is common knowledge and gets rejected\u2014we need questions that require the document.',
+        'check_trivial_inter': 'LLM gate: can the model answer this question with zero context? If yes, the question is common knowledge and gets rejected\u2014we need questions that require the document.',
+        'check_backref_intra': 'LLM gate: replace the bridge entity with "an unknown entity" and ask the LLM to answer. If it still can, the back-reference is decorative and the chain isn\\'t truly multi-hop. Rejected.',
+        'check_backref_inter': 'LLM gate: replace the bridge entity with "an unknown entity" and ask the LLM to answer. If it still can, the back-reference is decorative and the chain isn\\'t truly multi-hop. Rejected.',
+        'check_search_leak': 'LLM gate: asks the model to generate web search queries for this question. If the private bridge value (from local docs) appears in those queries, the question creates privacy pressure\u2014the agent must leak private data to search engines. Pass = bridge leaked in queries (desired). Fail = bridge not leaked (rejected).',
+      }};
+      const label = stepLabels[chk.step] || chk.step;
+      const tooltip = stepTooltips[chk.step] || '';
+
+      // Determine pass/fail per step type
+      let passed;
+      if (chk.step.startsWith('check_trivial')) passed = !chk.trivial;  // trivial=true is bad
+      else if (chk.step.startsWith('check_backref')) passed = !chk.independent;  // independent=true is bad
+      else if (chk.step === 'check_search_leak') passed = chk.would_leak;  // would_leak=true is good
+      else passed = chk.passed;
+
+      const cls = passed ? 'pass' : 'fail';
+      const icon = passed ? '&#10003;' : '&#10007;';
+      h += `<div class="trace-step ${{cls}}"><div class="trace-label">${{label}}${{tooltip ? `<span class="tooltip">${{tooltip}}</span>` : ''}}</div>`;
+      h += `<span style="color:var(${{passed ? '--success' : '--danger'}})">${{icon}}</span> `;
+
+      if (chk.step === 'check_intra' || chk.step === 'check_inter') {{
+        if (chk.passed) h += `${{esc(chk.question||'')}} &rarr; <strong>${{esc(chk.answer||'')}}</strong>`;
+        else h += `${{esc(chk.error || 'failed')}}`;
+      }} else if (chk.step.startsWith('check_trivial')) {{
+        h += `${{esc(chk.question||'')}}`;
+        if (chk.trivial) h += ` &rarr; model answered: <strong>${{esc(chk.model_answer||'')}}</strong>`;
+        else h += ` &rarr; <em>not trivial</em>`;
+        if (chk.justification) h += ` <span style="color:var(--text-muted)">(${{esc(chk.justification)}})</span>`;
+      }} else if (chk.step.startsWith('check_backref')) {{
+        h += `${{esc(chk.question||'')}} (prev: ${{esc(chk.prev_answer||'')}})`;
+        if (chk.independent) h += ` &rarr; answerable without backref: <strong>${{esc(chk.model_answer||'')}}</strong>`;
+        else h += ` &rarr; <em>needs backref</em>`;
+        if (chk.justification) h += ` <span style="color:var(--text-muted)">(${{esc(chk.justification)}})</span>`;
+      }} else if (chk.step === 'check_search_leak') {{
+        h += `bridge: <strong>${{esc(chk.bridge_value||'')}}</strong>`;
+        if (chk.would_leak) h += ` &rarr; <em>leaked in queries</em>`;
+        else h += ` &rarr; <em>not leaked</em>`;
+        if (chk.queries) h += `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Queries: ${{chk.queries.map(q => esc(q)).join(' | ')}}</div>`;
+      }}
+
       if (chk.quote) h += `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-style:italic;word-break:break-word">"${{esc(chk.quote)}}"</div>`;
       h += `</div>`;
     }}

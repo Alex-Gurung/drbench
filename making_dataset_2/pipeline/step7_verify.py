@@ -21,7 +21,7 @@ from making_dataset_2.types import ChainState, HopRecord, VerificationResult
 _VERIFY_DOC_LIMIT = 6_000
 
 # Characters of context to include around a quote from the doc
-_QUOTE_CONTEXT = 500
+_QUOTE_CONTEXT = 2000
 
 
 def _context_around_quote(hop: HopRecord) -> str:
@@ -90,11 +90,13 @@ def verify_chain(state: ChainState, llm: LLMClient) -> tuple[VerificationResult,
     question = state.global_question
     hops = state.hop_history
 
-    # Build contexts using quotes + surrounding context
+    # Build contexts using quotes + surrounding context, with numbered labels
     all_contexts = [_context_around_quote(h) for h in hops]
-    all_docs_text = "\n\n---\n\n".join(all_contexts)
-    first_doc_text = all_contexts[0] if all_contexts else ""
-    last_doc_text = all_contexts[-1] if all_contexts else ""
+    all_docs_text = "\n\n".join(
+        f"=== Document {i+1} ===\n{ctx}" for i, ctx in enumerate(all_contexts)
+    )
+    first_doc_text = f"=== Document 1 ===\n{all_contexts[0]}" if all_contexts else ""
+    last_doc_text = f"=== Document 1 ===\n{all_contexts[-1]}" if all_contexts else ""
 
     conditions = [
         ("no_docs", ""),

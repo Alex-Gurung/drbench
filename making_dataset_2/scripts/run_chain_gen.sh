@@ -21,7 +21,7 @@ MODEL="${MODEL:-step-3.5-flash}"
 BASE_URL="${BASE_URL:-http://dns-4943305a-c17f-44b1-b767-9536529eb8bc-step35flash-vllm:8000/v1}"
 N="${N:-50}"
 WORKERS="${WORKERS:-20}"
-MIN_MAX_TOKENS="${MIN_MAX_TOKENS:-16000}"
+MIN_MAX_TOKENS="${MIN_MAX_TOKENS:-32000}"
 
 # All L/W patterns length 2-4
 ALL_PATTERNS="LL LW WL WW LLL LLW LWL LWW WLL WLW WWL WWW LLLL LLLW LLWL LLWW LWLL LWLW LWWL LWWW WLLL WLLW WLWL WLWW WWLL WWLW WWWL WWWW"
@@ -67,6 +67,11 @@ if [ -n "$SEARCH_URL" ]; then
     SEARCH_FLAG="--search-url $SEARCH_URL"
 fi
 
+CHUNKS_LOCAL_FLAG=""
+if [ -n "${CHUNKS_LOCAL:-}" ]; then
+    CHUNKS_LOCAL_FLAG="--chunks-local $CHUNKS_LOCAL"
+fi
+
 $PYTHON -m making_dataset_2.pipeline.chain_builder \
     --patterns $PATTERNS \
     --n "$N" \
@@ -79,7 +84,9 @@ $PYTHON -m making_dataset_2.pipeline.chain_builder \
     --workers "$WORKERS" \
     $RESUME_FLAG \
     $SEARCH_FLAG \
+    $CHUNKS_LOCAL_FLAG \
     --verbose \
+    "$@" \
     2>&1 | tee -a "$LOGFILE"
 
 echo "" | tee -a "$LOGFILE"

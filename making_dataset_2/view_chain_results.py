@@ -42,9 +42,15 @@ def _esc(s) -> str:
     return html_mod.escape(str(s))
 
 
+def _safe_json_for_html(obj) -> str:
+    """Serialize to JSON safe for embedding in <script> tags."""
+    s = json.dumps(obj, ensure_ascii=False)
+    return s.replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
 def generate_html(results: list[dict], summary: dict | None, output: Path) -> None:
-    results_json = json.dumps(results, ensure_ascii=False)
-    summary_json = json.dumps(summary, ensure_ascii=False) if summary else "null"
+    results_json = _safe_json_for_html(results)
+    summary_json = _safe_json_for_html(summary) if summary else "null"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">

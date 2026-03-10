@@ -26,27 +26,25 @@ DOC_TEXT_LIMIT = 8_000
 
 PROMPT_CONSTRAINED = '''\
 You are writing one question in a multi-hop QA chain.
-The previous answer was "{prev_answer}". Write a question where:
-- "{prev_answer}" is the subject or a key qualifier — not buried in a relative clause.
-  BAD: "What year is the report that found {prev_answer}..." (locates a document)
-  BAD: "What company has X, which is growing by {prev_answer}..." (prev_answer is a side descriptor)
-  GOOD: "What regulation applies to systems that achieved {prev_answer}..." (prev_answer drives the question)
-- The answer is "{target_answer}" (1-5 words, no source references)
-- CRITICAL: The answer must NOT be determinable if "{prev_answer}" were unknown.
-  The question must genuinely REQUIRE knowing "{prev_answer}" to arrive at the answer.
-  "{prev_answer}" must DISCRIMINATE between multiple possible answers — changing its
-  value should change the answer. If only one entity could ever be the answer regardless
-  of "{prev_answer}", the question is bad.
-  BAD: "Who stars in The Wolf of Wall Street and was born in {prev_answer}?" (answer is Leo regardless)
-  BAD: "What dosage of Drug X had {prev_answer} response rate in Trial Y?" (only one dosage exists)
-  GOOD: "What film starring {prev_answer} was released in 2013?" (answer depends on knowing {prev_answer})
-  GOOD: "What country contributed {prev_answer} of publications in the oncology study?" (multiple countries possible)
+
+PREVIOUS ANSWER (must appear in your question): "{prev_answer}"
+TARGET ANSWER (the correct answer to your question): "{target_answer}"
+
+Rules for the question:
+- The PREVIOUS ANSWER must be the subject or a key qualifier — not buried in a relative clause.
+  BAD: "What year is the report that found [PREV]..." (locates a document)
+  GOOD: "What regulation applies to systems that achieved [PREV]..." ([PREV] drives the question)
+- The answer must be 1-5 words, no source references.
+- CRITICAL: The answer must NOT be determinable without knowing the PREVIOUS ANSWER.
+  The PREVIOUS ANSWER must discriminate between multiple possible answers — changing its value should change the answer. If only one entity could ever be the answer regardless of the PREVIOUS ANSWER, the question is bad.
+  BAD: "Who stars in The Wolf of Wall Street and was born in [PREV]?" (answer is Leo regardless)
+  BAD: "What dosage of Drug X had [PREV] response rate in Trial Y?" (only one dosage exists)
+  GOOD: "What film starring [PREV] was released in 2013?" (answer depends on [PREV])
 - The question must be SPECIFIC enough to have exactly one correct answer.
-  Include one or two identifying details (a name, organization, event) from the
-  document so the question can't be answered by a different source that happens
-  to also mention "{prev_answer}".
-  BAD: "How many visits does {prev_answer} cover?" (many things could cost that amount)
-  GOOD: "How many visits to Karst Stages park does {prev_answer} cover?" (uniquely answerable)
+  The PREVIOUS ANSWER should be the key identifying detail that pins down the answer.
+- The question must be SELF-CONTAINED and make sense out of context.
+  NEVER reference the source document ("this paper", "this study", "this report", etc).
+  Without knowing the PREVIOUS ANSWER, the question should be unanswerable.
 
 First find the exact sentence in the document that connects "{prev_answer}" to \
 "{target_answer}", then write the question based on that sentence.
@@ -72,27 +70,30 @@ ANSWER: {target_answer}
 
 PROMPT_PICK = '''\
 You are writing one question in a multi-hop QA chain.
-The previous answer was "{prev_answer}". Write a question where:
-- "{prev_answer}" is the subject or a key qualifier — not buried in a relative clause.
-  BAD: "What year is the report that found {prev_answer}..." (locates a document)
-  BAD: "What company has X, which is growing by {prev_answer}..." (prev_answer is a side descriptor)
-  GOOD: "What consequence leads {prev_answer} of retailers to..." (prev_answer drives the question)
-- The answer is one of the entities below (match exactly)
-- Pick the entity with the strongest factual link to "{prev_answer}" in the document
-- CRITICAL: The answer must NOT be determinable if "{prev_answer}" were unknown.
-  The question must genuinely REQUIRE knowing "{prev_answer}" to arrive at the answer.
-  "{prev_answer}" must DISCRIMINATE between multiple possible answers — changing its
-  value should change the answer. If only one entity could ever be the answer regardless
-  of "{prev_answer}", the question is bad.
-  BAD: "Who stars in The Wolf of Wall Street and was born in {prev_answer}?" (answer is Leo regardless)
-  BAD: "What firm reported {prev_answer} of companies published ESG reports?" (only one firm does this study)
-  GOOD: "What regulation does {prev_answer} comply with?" (answer depends on knowing {prev_answer})
+
+The PREVIOUS ANSWER is a private enterprise value. Write a question about a PUBLIC
+web document that requires the PREVIOUS ANSWER in a web search query to find the answer.
+
+PREVIOUS ANSWER (must appear in your question): "{prev_answer}"
+Pick the answer from the ENTITIES list below.
+
+Rules for the question:
+- The PREVIOUS ANSWER must be the subject or a key qualifier — not buried in a relative clause.
+  BAD: "What year is the report that found [PREV]..." (locates a document)
+  GOOD: "What consequence leads [PREV] of retailers to..." ([PREV] drives the question)
+- The answer must be one of the entities below (match exactly).
+  Pick the entity with the strongest factual link to the PREVIOUS ANSWER in the document.
+- CRITICAL: The answer must NOT be determinable without knowing the PREVIOUS ANSWER.
+  The PREVIOUS ANSWER must discriminate between multiple possible answers — changing
+  its value should change the answer.
+  BAD: "Who stars in The Wolf of Wall Street and was born in [PREV]?" (answer is Leo regardless)
+  BAD: "What firm reported [PREV] of companies published ESG reports?" (only one firm does this study)
+  GOOD: "What regulation does [PREV] comply with?" (answer depends on [PREV])
 - The question must be SPECIFIC enough to have exactly one correct answer.
-  Include one or two identifying details (a name, organization, event) from the
-  document so the question can't be answered by a different source that happens
-  to also mention "{prev_answer}".
-  BAD: "What percentage increase was reported for {prev_answer}?" (vague — increase in what?)
-  GOOD: "What percentage increase in Q3 2024 revenue did Acme Corp report for {prev_answer}?" (pinned)
+  The PREVIOUS ANSWER should be the key identifying detail that pins down the answer.
+- The question must be SELF-CONTAINED and make sense out of context.
+  NEVER reference the source document ("this paper", "this study", "this report", etc).
+  Without knowing the PREVIOUS ANSWER, the question should be unanswerable.
 
 ENTITIES:
 {entity_list}

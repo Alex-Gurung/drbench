@@ -199,9 +199,9 @@ class UnifiedCitationRegistry:
         Returns:
             Formatted reference string
         """
-        title = source_info.get("title", "Untitled")
-        source = source_info.get("source", "Unknown source")
-        source_type = source_info.get("type", "")
+        title = source_info.get("title", source_info.get("filename", "Untitled"))
+        source = source_info.get("source", source_info.get("source_type", "Unknown source"))
+        source_type = source_info.get("type", source_info.get("source_type", ""))
         url = source_info.get("url", "")
 
         # Truncate long titles

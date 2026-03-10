@@ -48,6 +48,7 @@ from making_dataset_2.pipeline.step5_check import (
     check_answer_needs_backref,
     check_answerable_without_doc,
     check_question,
+    check_search_leaks_bridge,
 )
 from making_dataset_2.pipeline.step7_verify import verify_chain
 from making_dataset_2.types import Chain, ChainState, HopRecord
@@ -57,13 +58,13 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 DEFAULT_SECRETS = ROOT_DIR / "making_dataset_2" / "outputs" / "secret_inventory.jsonl"
-DEFAULT_CHUNKS_LOCAL = ROOT_DIR / "making_dataset" / "outputs" / "chunks_local.jsonl"
+DEFAULT_CHUNKS_LOCAL = Path("/home/toolkit/nice_code/making_dataset/outputs/chunks_local.jsonl")
 DEFAULT_CHUNKS_WEB = [
-    ROOT_DIR / "making_dataset" / "outputs" / "chunks_web.jsonl",  # BrowseComp-Plus (100K docs)
+    Path("/home/toolkit/nice_code/making_dataset/outputs/chunks_web.jsonl"),  # BrowseComp-Plus (100K docs)
     ROOT_DIR / "making_dataset_2" / "outputs" / "chunks_web_drbench_urls.jsonl",  # curated DrBench URLs
 ]
 
-MAX_CANDIDATES = 8  # Bridge candidates to generate questions for
+MAX_CANDIDATES = 10  # Bridge candidates to generate questions for
 MAX_ENTITY_LIST = 20  # Max entities to show in pick prompt
 CONTEXT_WINDOW = 4000  # Chars of context around bridge entity for question generation
 
@@ -311,10 +312,25 @@ def build_one_chain(
                             q_inter[:60], bridge_entity, backref_inter.answer, backref_inter.justification)
                 continue
 
+            # Check if web search for this question would leak the bridge value
+            search_leak = check_search_leaks_bridge(q_inter, bridge_entity, llm)
+            llm_calls += 1
+            if record_trace:
+                state.trace.append({
+                    "step": "check_search_leak", "transition": jump_idx + 1,
+                    "question": q_inter, "bridge_value": bridge_entity,
+                    "would_leak": search_leak.would_leak,
+                    "queries": search_leak.queries, "justification": search_leak.justification,
+                })
+            if not search_leak.would_leak:
+                logger.info("  Inter NO-LEAK: bridge %r not in search queries %s",
+                            bridge_entity, search_leak.queries)
+                continue
+
             option["inter_q"] = q_inter
             option["inter_a"] = a_inter
             option["inter_quote"] = quote_inter
-            logger.info("  Inter OK: %r → %r", q_inter[:60], a_inter)
+            logger.info("  Inter OK (leaks bridge): %r → %r  queries=%s", q_inter[:60], a_inter, search_leak.queries)
             valid_options.append(option)
 
         if not valid_options:
@@ -520,6 +536,7 @@ def _chain_to_dict(chain: Chain) -> dict:
             }
             for h in chain.hop_history
         ],
+        "valid": chain.verification.is_valid if chain.verification else False,
         "metadata": chain.metadata,
     }
     if chain.verification is not None:
