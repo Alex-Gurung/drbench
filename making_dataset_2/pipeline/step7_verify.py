@@ -21,7 +21,7 @@ from making_dataset_2.types import ChainState, HopRecord, VerificationResult
 _VERIFY_DOC_LIMIT = 6_000
 
 # Characters of context to include around a quote from the doc
-_QUOTE_CONTEXT = 2000
+_QUOTE_CONTEXT = 20_000
 
 
 def _context_around_quote(hop: HopRecord) -> str:

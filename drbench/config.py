@@ -57,9 +57,14 @@ DRBENCH_DOCKER_TAG = os.getenv("DRBENCH_DOCKER_TAG", "latest")
 DRBENCH_LLM_PROVIDER = os.getenv("DRBENCH_LLM_PROVIDER", "openai")
 
 # Embedding provider: openai | openrouter | huggingface | vllm
-DRBENCH_EMBEDDING_PROVIDER = os.getenv("DRBENCH_EMBEDDING_PROVIDER", "openai")
-DRBENCH_EMBEDDING_MODEL = os.getenv("DRBENCH_EMBEDDING_MODEL")
-DRBENCH_EMBEDDING_DEVICE = os.getenv("DRBENCH_EMBEDDING_DEVICE")
+DRBENCH_EMBEDDING_PROVIDER = os.getenv("DRBENCH_EMBEDDING_PROVIDER", "huggingface")
+DRBENCH_EMBEDDING_MODEL = os.getenv("DRBENCH_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-4B")
+DRBENCH_EMBEDDING_DEVICE = os.getenv("DRBENCH_EMBEDDING_DEVICE", "cpu")
+
+# Ensure defaults are visible to downstream os.getenv() calls
+os.environ.setdefault("DRBENCH_EMBEDDING_PROVIDER", DRBENCH_EMBEDDING_PROVIDER)
+os.environ.setdefault("DRBENCH_EMBEDDING_MODEL", DRBENCH_EMBEDDING_MODEL)
+os.environ.setdefault("DRBENCH_EMBEDDING_DEVICE", DRBENCH_EMBEDDING_DEVICE)
 
 # =============================================================================
 # RunConfig - Runtime configuration for task execution

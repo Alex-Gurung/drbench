@@ -67,8 +67,9 @@ def _parse_args() -> argparse.Namespace:
 
     p.add_argument("--model", required=True)
     p.add_argument("--llm-provider", type=str, choices=["openai", "vllm", "openrouter", "azure", "together"])
-    p.add_argument("--embedding-provider", type=str, choices=["openai", "openrouter", "huggingface", "vllm"])
-    p.add_argument("--embedding-model", type=str)
+    p.add_argument("--embedding-provider", type=str, choices=["openai", "openrouter", "huggingface", "vllm"], default="huggingface")
+    p.add_argument("--embedding-model", type=str, default="Qwen/Qwen3-Embedding-4B")
+    p.add_argument("--embedding-device", type=str, default="cpu", help="Device for HF embeddings (default: cpu)")
 
     p.add_argument("--max-iterations", type=int, default=10)
     p.add_argument("--concurrent-actions", type=_positive_int, default=3)
@@ -839,6 +840,9 @@ def _write_summary(output_path: Path, chain_summaries: list[dict],
 
 def main() -> int:
     args = _parse_args()
+
+    # Set embedding device env var early, before any model loading
+    os.environ["DRBENCH_EMBEDDING_DEVICE"] = args.embedding_device
 
     if args.data_dir:
         os.environ["DRBENCH_DATA_DIR"] = str(Path(args.data_dir))

@@ -19,8 +19,11 @@ Your task: trace through ALL questions in order and provide the FINAL answer. \
 You must answer every intermediate question to reach the final one. \
 If ANY step cannot be answered from the context, respond NOT_ANSWERABLE.
 
-CONTEXT:
+CONTEXT (may contain multiple numbered documents, each labeled === Document N ===):
 {context}
+
+Each question may require information from a different document. If the relevant \
+document for a step is not provided above, that step cannot be answered.
 
 QUESTION CHAIN:
 {question}
