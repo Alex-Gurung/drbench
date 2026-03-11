@@ -81,7 +81,10 @@ class AIAgentManager:
 
     def _setup_credentials(self, api_key: Optional[str], api_url: Optional[str]):
         """Set up API credentials based on provider."""
-        if self.provider == "openai":
+        if self.provider == "openrouter":
+            self.api_key = api_key or config.OPENROUTER_API_KEY
+            self.api_url = api_url or getattr(config, "OPENROUTER_API_URL", "https://openrouter.ai/api/v1")
+        elif self.provider == "openai":
             self.api_key = api_key or config.OPENAI_API_KEY
             self.api_url = None
             if not self.api_key:
@@ -97,7 +100,11 @@ class AIAgentManager:
                     "DRBENCH_LLM_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set"
                 )
 
-        elif self.provider == "vllm":
+        elif self.provider == "openrouter":
+            self.client = OpenAI(base_url=self.api_url, api_key=self.api_key)
+            # Store the actual model name without the openrouter/ prefix
+            self.actual_model = self.model[len("openrouter/"):]
+        elif self.service == "vllm":
             self.api_key = api_key or config.VLLM_API_KEY or "not-needed"
             self.api_url = api_url or os.getenv("VLLM_API_URL")
             if not self.api_url:
@@ -174,7 +181,17 @@ class AIAgentManager:
         logger.debug(f"Prompting {self.model} via {self.provider}")
 
         if not self.client:
-            raise ValueError("Client not initialized")
+            raise ValueError("Client not initialized. Please provide a valid API key.")
+
+        if self.service == "openrouter":
+            model = self.actual_model
+        elif self.model not in AVAILABLE_MODELS:
+            print(
+                f"Warning: Model {self.model} not in available models list. Using default."
+            )
+            model = "meta-llama/Meta-Llama-3-8B-Instruct-Lite"
+        else:
+            model = self.model
 
         try:
             if response_format:
