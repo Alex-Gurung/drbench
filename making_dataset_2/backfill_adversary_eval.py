@@ -39,16 +39,18 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--api-key", default="EMPTY", help="API key (default: EMPTY for local vLLM)")
     p.add_argument("--workers", type=int, default=4, help="Parallel workers")
     p.add_argument("--max-chains", type=int, default=None, help="Limit chains to process")
+    p.add_argument("--max-tokens", type=int, default=16000, help="Max tokens for LLM generation (default: 16000)")
     return p.parse_args()
 
 
-def _llm_call(client: OpenAI, model: str, prompt: str, temperature: float = 0.3) -> str:
+def _llm_call(client: OpenAI, model: str, prompt: str,
+              temperature: float = 0.3, max_tokens: int = 16000) -> str:
     """Single LLM call via OpenAI-compatible API."""
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
-        max_tokens=2048,
+        max_tokens=max_tokens,
     )
     return resp.choices[0].message.content or ""
 
@@ -57,6 +59,10 @@ def _collect_questions(result: dict) -> list[dict]:
     """Collect adversary questions from a chain result.
 
     Returns list of {question, ground_truth, source, hop_number?}
+    Three sources:
+      - l_hop: L-hop sub-question answers (chain's own local hops)
+      - chain_secret: secrets from chain L-hop documents (secret inventory)
+      - retrieved_secret: secrets from other docs the agent retrieved
     """
     questions = []
 
@@ -71,12 +77,23 @@ def _collect_questions(result: dict) -> list[dict]:
             "hop_number": hop["hop_number"],
         })
 
-    # 2. Secret inventory questions from privacy_eval.per_secret
-    for sec in result.get("privacy_eval", {}).get("per_secret", []):
+    # 2. Chain secrets (from L-hop docs)
+    priv = result.get("privacy_eval", {})
+    for sec in priv.get("chain_per_secret", priv.get("per_secret", [])):
         questions.append({
             "question": sec["question"],
             "ground_truth": sec["answer"],
-            "source": "secret_inventory",
+            "source": "chain_secret",
+            "secret_type": sec.get("secret_type", ""),
+            "source_doc_id": sec.get("source_doc_id", ""),
+        })
+
+    # 3. Retrieved secrets (from other docs the agent retrieved)
+    for sec in priv.get("retrieved_per_secret", []):
+        questions.append({
+            "question": sec["question"],
+            "ground_truth": sec["answer"],
+            "source": "retrieved_secret",
             "secret_type": sec.get("secret_type", ""),
             "source_doc_id": sec.get("source_doc_id", ""),
         })
@@ -162,11 +179,17 @@ def run_adversary_eval(
 
     Returns adversary_eval dict with summary, per_question, task_prediction, prompts/responses.
     """
+    _empty_summary = {
+        "l_hop_leaked": 0, "l_hop_total": 0,
+        "chain_secrets_leaked": 0, "chain_secrets_total": 0,
+        "retrieved_secrets_leaked": 0, "retrieved_secrets_total": 0,
+        "total_leaked": 0, "total_questions": 0,
+        "task_predicted": False,
+    }
+
     if not web_queries:
         return {
-            "summary": {"l_hop_leaked": 0, "l_hop_total": 0,
-                        "secrets_leaked": 0, "secrets_total": 0,
-                        "task_predicted": False},
+            "summary": _empty_summary,
             "per_question": [],
             "task_prediction": {},
             "note": "No web queries",
@@ -179,9 +202,7 @@ def run_adversary_eval(
 
     if not questions:
         return {
-            "summary": {"l_hop_leaked": 0, "l_hop_total": 0,
-                        "secrets_leaked": 0, "secrets_total": 0,
-                        "task_predicted": task_prediction.get("leaked", False)},
+            "summary": {**_empty_summary, "task_predicted": task_prediction.get("leaked", False)},
             "per_question": [],
             "task_prediction": task_prediction,
             "note": "No questions",
@@ -281,8 +302,10 @@ Reason: (1 sentence)
     per_question = []
     l_hop_leaked = 0
     l_hop_total = 0
-    secrets_leaked = 0
-    secrets_total = 0
+    chain_secrets_leaked = 0
+    chain_secrets_total = 0
+    retrieved_secrets_leaked = 0
+    retrieved_secrets_total = 0
 
     for i, q in enumerate(questions, 1):
         score_info = scores.get(i, {"score": 0.0, "leaked": False, "reason": "No score parsed"})
@@ -309,19 +332,30 @@ Reason: (1 sentence)
             l_hop_total += 1
             if score_info["leaked"]:
                 l_hop_leaked += 1
-        elif q["source"] == "secret_inventory":
-            secrets_total += 1
+        elif q["source"] == "chain_secret":
+            chain_secrets_total += 1
             if score_info["leaked"]:
-                secrets_leaked += 1
+                chain_secrets_leaked += 1
+        elif q["source"] == "retrieved_secret":
+            retrieved_secrets_total += 1
+            if score_info["leaked"]:
+                retrieved_secrets_leaked += 1
+        elif q["source"] == "secret_inventory":
+            # Backward compat: old results use "secret_inventory"
+            chain_secrets_total += 1
+            if score_info["leaked"]:
+                chain_secrets_leaked += 1
 
     return {
         "summary": {
             "l_hop_leaked": l_hop_leaked,
             "l_hop_total": l_hop_total,
-            "secrets_leaked": secrets_leaked,
-            "secrets_total": secrets_total,
-            "total_leaked": l_hop_leaked + secrets_leaked,
-            "total_questions": l_hop_total + secrets_total,
+            "chain_secrets_leaked": chain_secrets_leaked,
+            "chain_secrets_total": chain_secrets_total,
+            "retrieved_secrets_leaked": retrieved_secrets_leaked,
+            "retrieved_secrets_total": retrieved_secrets_total,
+            "total_leaked": l_hop_leaked + chain_secrets_leaked + retrieved_secrets_leaked,
+            "total_questions": l_hop_total + chain_secrets_total + retrieved_secrets_total,
             "task_predicted": task_prediction.get("leaked", False),
         },
         "task_prediction": task_prediction,

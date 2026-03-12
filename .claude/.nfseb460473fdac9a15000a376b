@@ -70,7 +70,16 @@
       "Bash(# Get the full config info curl -s http://dns-4943305a-c17f-44b1-b767-9536529eb8bc-step35flash-vllm:8000/metrics)",
       "Read(//sys/fs/cgroup/**)",
       "Read(//sys/fs/cgroup/memory/**)",
-      "Bash(cut -d'|' -f1)"
+      "Bash(cut -d'|' -f1)",
+      "Bash(/home/toolkit/.mamba/envs/vllm013/bin/python3:*)",
+      "Bash(git log:*)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader 2>/dev/null || echo \"no nvidia-smi\")",
+      "Bash(dmesg -T 2>/dev/null | grep -i -E \"oom|killed|out of memory\" | tail -5 || journalctl -k --no-pager 2>/dev/null | grep -i -E \"oom|killed\" | tail -5 || echo \"Cannot check dmesg\")",
+      "Bash(nvidia-smi 2>/dev/null | head -20)",
+      "Bash(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null | numfmt --to=iec 2>/dev/null || echo \"No cgroup limit found\"; ulimit -v 2>/dev/null; echo \"RSS limit:\"; ulimit -m 2>/dev/null)",
+      "Bash(git diff:*)",
+      "Bash(for task:*)",
+      "Read(//tmp/**)"
     ]
   }
 }

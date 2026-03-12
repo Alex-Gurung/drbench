@@ -71,6 +71,7 @@ class AIAgentManager:
 
         self.client = None
         self.model = model
+        self.actual_model = model  # May be overridden for openrouter (prefix stripped)
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.with_linebreak = with_linebreak
@@ -81,10 +82,7 @@ class AIAgentManager:
 
     def _setup_credentials(self, api_key: Optional[str], api_url: Optional[str]):
         """Set up API credentials based on provider."""
-        if self.provider == "openrouter":
-            self.api_key = api_key or config.OPENROUTER_API_KEY
-            self.api_url = api_url or getattr(config, "OPENROUTER_API_URL", "https://openrouter.ai/api/v1")
-        elif self.provider == "openai":
+        if self.provider == "openai":
             self.api_key = api_key or config.OPENAI_API_KEY
             self.api_url = None
             if not self.api_key:
@@ -94,17 +92,13 @@ class AIAgentManager:
 
         elif self.provider == "openrouter":
             self.api_key = api_key or config.OPENROUTER_API_KEY
-            self.api_url = api_url or config.OPENROUTER_API_URL
+            self.api_url = api_url or getattr(config, "OPENROUTER_API_URL", "https://openrouter.ai/api/v1")
             if not self.api_key:
                 raise ValueError(
                     "DRBENCH_LLM_PROVIDER=openrouter requires OPENROUTER_API_KEY to be set"
                 )
 
-        elif self.provider == "openrouter":
-            self.client = OpenAI(base_url=self.api_url, api_key=self.api_key)
-            # Store the actual model name without the openrouter/ prefix
-            self.actual_model = self.model[len("openrouter/"):]
-        elif self.service == "vllm":
+        elif self.provider == "vllm":
             self.api_key = api_key or config.VLLM_API_KEY or "not-needed"
             self.api_url = api_url or os.getenv("VLLM_API_URL")
             if not self.api_url:
@@ -135,6 +129,7 @@ class AIAgentManager:
 
         elif self.provider == "openrouter":
             self.client = OpenAI(base_url=self.api_url, api_key=self.api_key)
+            self.actual_model = self.model.removeprefix("openrouter/")
 
         elif self.provider == "vllm":
             self.client = OpenAI(base_url=f"{self.api_url}/v1", api_key=self.api_key)
@@ -183,21 +178,11 @@ class AIAgentManager:
         if not self.client:
             raise ValueError("Client not initialized. Please provide a valid API key.")
 
-        if self.service == "openrouter":
-            model = self.actual_model
-        elif self.model not in AVAILABLE_MODELS:
-            print(
-                f"Warning: Model {self.model} not in available models list. Using default."
-            )
-            model = "meta-llama/Meta-Llama-3-8B-Instruct-Lite"
-        else:
-            model = self.model
-
         try:
             if response_format:
                 structured_response_function = self.get_structured_response_function()
                 response = structured_response_function(
-                    model=self.model,
+                    model=self.actual_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
@@ -219,12 +204,12 @@ class AIAgentManager:
                     response,
                     request_kind="chat.completions.parse",
                     requested_model=self.model,
-                    resolved_model=self.model,
+                    resolved_model=self.actual_model,
                     source="gen_agent.prompt_llm",
                 )
             else:
                 response = self.client.chat.completions.create(
-                    model=self.model,
+                    model=self.actual_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
@@ -233,7 +218,7 @@ class AIAgentManager:
                     response,
                     request_kind="chat.completions",
                     requested_model=self.model,
-                    resolved_model=self.model,
+                    resolved_model=self.actual_model,
                     source="gen_agent.prompt_llm",
                 )
                 output = response.choices[0].message.content
